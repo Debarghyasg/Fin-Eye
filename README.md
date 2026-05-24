@@ -1,27 +1,15 @@
 <div align="center">
-
   <img src="frontend/public/logo.svg" alt="Fin-Sight" width="320" />
-
-  ### Financial Document Intelligence — 100% Free Stack
-
-  **Upload financial filings → ask questions → get cited answers**
-
+  <h3>Financial Document Intelligence — 100% Free Stack</h3>
+  <p><strong>Upload financial filings &rarr; ask questions &rarr; get cited answers</strong></p>
   <p>
-    <a href="#-quick-start"><strong>Quick start</strong></a> ·
-    <a href="#-architecture"><strong>Architecture</strong></a> ·
-    <a href="#-api-reference"><strong>API</strong></a> ·
-    <a href="#-tech-stack"><strong>Tech</strong></a>
+    <img alt="Next.js"    src="https://img.shields.io/badge/Next.js-15.3-000000?style=flat&logo=next.js" />
+    <img alt="FastAPI"    src="https://img.shields.io/badge/FastAPI-0.111-009688?style=flat&logo=fastapi" />
+    <img alt="Postgres"   src="https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql" />
+    <img alt="ChromaDB"   src="https://img.shields.io/badge/ChromaDB-0.5-FF6B6B?style=flat" />
+    <img alt="Groq"       src="https://img.shields.io/badge/Groq-Llama_3.1_70B-F97316?style=flat" />
+    <img alt="Cost"       src="https://img.shields.io/badge/Cost-%240%2Fmonth-22c55e?style=flat" />
   </p>
-
-  <p>
-    <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15.3-000000?style=flat&logo=next.js" />
-    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.111-009688?style=flat&logo=fastapi" />
-    <img alt="Postgres" src="https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql" />
-    <img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-0.5-FF6B6B?style=flat" />
-    <img alt="Groq" src="https://img.shields.io/badge/Groq-Llama_3.1_70B-F97316?style=flat" />
-    <img alt="Cost" src="https://img.shields.io/badge/Cost-%240%2Fmonth-22c55e?style=flat" />
-  </p>
-
 </div>
 
 ---
@@ -34,7 +22,7 @@ Fin-Sight is a production-grade RAG platform built specifically for financial do
 
 ---
 
-## ✨ Key features
+## Key features
 
 - **Hybrid RAG** — ChromaDB dense vector search + BM25 sparse search merged via Reciprocal Rank Fusion
 - **Cross-encoder reranking** — `ms-marco-MiniLM-L-6-v2` reorders top-20 candidates for relevance
@@ -48,25 +36,25 @@ Fin-Sight is a production-grade RAG platform built specifically for financial do
 
 ---
 
-## 🆓 Why is everything free?
+## Why is everything free?
 
 | Layer | Service | Free tier |
 |---|---|---|
-| LLM | **Groq** (Llama 3.1 70B) | 14,400 requests/day, 6k tokens/min |
+| LLM | **Groq** (Llama 3.1 70B) | 14,400 requests / day, 6k tokens / min |
 | Embeddings | **HuggingFace** `all-MiniLM-L6-v2` | Runs locally on CPU — no API |
 | Vector store | **ChromaDB** | Self-hosted in Docker, persistent volume |
 | Sparse search | **rank-bm25** + Redis | Both in Docker |
 | Database | **PostgreSQL 16** | In Docker |
 | File storage | **Local filesystem** | Docker volume |
 | Queue | **FastAPI BackgroundTasks** | In-process |
-| Auth | **Clerk** (free tier) | 10,000 MAU |
+| Auth | **Clerk** (free tier) | 10,000 monthly active users |
 | Re-ranker | **sentence-transformers** | CPU, 85 MB model |
 
-**Total monthly cost: $0.** No credit card needed except Clerk (and Clerk doesn't ask for one on the free tier).
+**Total monthly cost: \$0.** No credit card needed except Clerk (and Clerk doesn't ask for one on the free tier).
 
 ---
 
-## 🚀 Quick start
+## Quick start
 
 ### Prerequisites
 
@@ -109,12 +97,14 @@ docker-compose up
 ```
 
 This boots:
+
 - **PostgreSQL 16** (port 5432) — runs Alembic migrations automatically on first start
 - **Redis** (port 6379) — caches BM25 indices
 - **ChromaDB** (port 8001) — vector store with persistent volume
 - **FastAPI** (port 8000) — auto-reloads on file changes
 
 Verify:
+
 ```bash
 curl http://localhost:8000/api/v1/analytics/health
 # {"status":"ok","database":"ok",...}
@@ -132,98 +122,103 @@ npm install --legacy-peer-deps
 npm run dev
 ```
 
-Open **http://localhost:3000** → sign in → upload a 10-K → ask a question.
+Open **http://localhost:3000**, sign in, upload a 10-K, ask a question.
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
-```
-                                 ┌──────────────────┐
-                                 │   Next.js 15     │
-                                 │   (Clerk auth)   │
-                                 └────────┬─────────┘
-                                          │ Bearer JWT
-                                 ┌────────▼─────────┐
-                                 │   FastAPI        │
-                                 │   /api/v1        │
-                                 └────┬─────────────┘
-                                      │
-        ┌─────────────────────────────┼──────────────────────────────┐
-        │                             │                              │
-        ▼                             ▼                              ▼
-┌──────────────┐             ┌──────────────┐               ┌──────────────┐
-│  PostgreSQL  │             │     RAG      │               │  Background  │
-│  (metadata,  │             │   pipeline   │               │  pipeline    │
-│  audit log)  │             │              │               │  (extract +  │
-└──────────────┘             │              │               │   chunk +    │
-                             │              │               │   embed)     │
-                             └──────┬───────┘               └──────┬───────┘
-                                    │                              │
-                  ┌─────────────────┼─────────────┐         ┌──────▼──────┐
-                  │                 │             │         │  PyMuPDF    │
-                  ▼                 ▼             ▼         │  pdfplumber │
-            ┌─────────┐       ┌──────────┐  ┌─────────┐    └──────┬──────┘
-            │ChromaDB │       │  Redis   │  │  Groq   │           │
-            │ (dense) │       │  BM25    │  │ Llama   │           │
-            └─────────┘       └──────────┘  │ 3.1 70B │      ┌────▼─────┐
-                                            └─────────┘      │  Local   │
-                                                             │  files / │
-                                                             │  S3      │
-                                                             └──────────┘
+```text
+                          +------------------+
+                          |   Next.js 15     |
+                          |   (Clerk auth)   |
+                          +--------+---------+
+                                   | Bearer JWT
+                          +--------v---------+
+                          |   FastAPI        |
+                          |   /api/v1        |
+                          +----+-------------+
+                               |
+   +---------------------------+-------------------------+
+   |                           |                         |
+   v                           v                         v
++------------+         +--------------+         +--------------+
+| PostgreSQL |         |     RAG      |         |  Background  |
+|  metadata  |         |   pipeline   |         |   pipeline   |
+| audit log  |         |              |         | (extract +   |
++------------+         +------+-------+         |  chunk +     |
+                              |                 |  embed)      |
+                              |                 +------+-------+
+              +---------------+---------------+        |
+              v               v               v        v
+        +----------+    +----------+    +----------+  +------------+
+        | ChromaDB |    |  Redis   |    |   Groq   |  |  PyMuPDF   |
+        |  dense   |    |   BM25   |    |  Llama   |  | pdfplumber |
+        |  search  |    |  sparse  |    | 3.1 70B  |  | extraction |
+        +----------+    +----------+    +----------+  +-----+------+
+                                                            v
+                                                      +----------+
+                                                      |  Local   |
+                                                      |  files / |
+                                                      |    S3    |
+                                                      +----------+
 ```
 
 ### Query flow
 
-```
-1. embed_query()        → all-MiniLM-L6-v2 (384-dim, local CPU)
-2. dense_search()       → ChromaDB top-20 (workspace_id filter)
-3. sparse_search()      → BM25 from Redis top-20
-4. rrf_merge()          → score(d) = Σ 1/(60 + rank_i)
-5. cross_encoder()      → reorder top-20 → top-5
-6. groq_chat()          → Llama 3.1 70B with JSON mode + strict citation prompt
-7. write_query_log()    → immutable audit row in Postgres
+```text
+1. embed_query()        -> all-MiniLM-L6-v2 (384-dim, local CPU)
+2. dense_search()       -> ChromaDB top-20 (workspace_id filter)
+3. sparse_search()      -> BM25 from Redis top-20
+4. rrf_merge()          -> score(d) = sum( 1 / (60 + rank_i) )
+5. cross_encoder()      -> reorder top-20 -> top-5
+6. groq_chat()          -> Llama 3.1 70B with JSON mode + strict citation prompt
+7. write_query_log()    -> immutable audit row in Postgres
 ```
 
 ---
 
-## 📡 API reference
+## API reference
 
 ### Auth
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/auth/me` | Current user profile |
-| `PATCH` | `/api/v1/auth/me` | Update display name / email |
-| `GET` | `/api/v1/auth/me/workspaces` | List workspaces |
-| `POST` | `/api/v1/auth/me/workspaces` | Create a workspace |
+
+| Method   | Path                            | Description                   |
+| -------- | ------------------------------- | ----------------------------- |
+| `GET`    | `/api/v1/auth/me`               | Current user profile          |
+| `PATCH`  | `/api/v1/auth/me`               | Update display name / email   |
+| `GET`    | `/api/v1/auth/me/workspaces`    | List workspaces               |
+| `POST`   | `/api/v1/auth/me/workspaces`    | Create a workspace            |
 
 ### Documents
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/documents/upload` | Upload PDF/DOCX/TXT (returns 202 immediately) |
-| `GET` | `/api/v1/documents?workspace_id=...` | Paginated list |
-| `GET` | `/api/v1/documents/{id}` | Document detail |
-| `GET` | `/api/v1/documents/{id}/status` | Lightweight polling endpoint |
-| `GET` | `/api/v1/documents/{id}/chunks` | Extracted chunks |
-| `PATCH` | `/api/v1/documents/{id}` | Update ticker / fiscal period |
-| `DELETE` | `/api/v1/documents/{id}` | Hard delete + cleanup |
+
+| Method   | Path                                      | Description                                |
+| -------- | ----------------------------------------- | ------------------------------------------ |
+| `POST`   | `/api/v1/documents/upload`                | Upload PDF / DOCX / TXT (returns 202)      |
+| `GET`    | `/api/v1/documents?workspace_id=...`      | Paginated list                             |
+| `GET`    | `/api/v1/documents/{id}`                  | Document detail                            |
+| `GET`    | `/api/v1/documents/{id}/status`           | Lightweight polling endpoint               |
+| `GET`    | `/api/v1/documents/{id}/chunks`           | Extracted chunks                           |
+| `PATCH`  | `/api/v1/documents/{id}`                  | Update ticker / fiscal period              |
+| `DELETE` | `/api/v1/documents/{id}`                  | Hard delete + cleanup                      |
 
 ### Queries
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/queries` | Run hybrid RAG query → cited answer |
-| `GET` | `/api/v1/queries/history` | Paginated audit log |
+
+| Method | Path                            | Description                          |
+| ------ | ------------------------------- | ------------------------------------ |
+| `POST` | `/api/v1/queries`               | Run hybrid RAG query, return answer  |
+| `GET`  | `/api/v1/queries/history`       | Paginated audit log                  |
 
 ### Analytics
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/analytics/health` | DB ping + version |
-| `GET` | `/api/v1/analytics/pipeline` | Per-stage health + latency |
-| `GET` | `/api/v1/analytics/stats?workspace_id=...` | Document + query counts |
+
+| Method | Path                                            | Description                       |
+| ------ | ----------------------------------------------- | --------------------------------- |
+| `GET`  | `/api/v1/analytics/health`                      | DB ping + version                 |
+| `GET`  | `/api/v1/analytics/pipeline`                    | Per-stage health + latency        |
+| `GET`  | `/api/v1/analytics/stats?workspace_id=...`      | Document + query counts           |
 
 ---
 
-## 🧱 Tech stack
+## Tech stack
 
 | Layer | Stack |
 |---|---|
@@ -244,56 +239,57 @@ Open **http://localhost:3000** → sign in → upload a 10-K → ask a question.
 
 ---
 
-## 📁 Repository layout
+## Repository layout
 
-```
+```text
 Fin-Eye/
-├── README.md
-├── docker-compose.yml
-├── frontend/
-│   ├── public/
-│   │   ├── logo.svg            # Full wordmark
-│   │   ├── logo-mark.svg       # Just the fin (used in sidebar/auth)
-│   │   └── favicon.svg
-│   ├── src/
-│   │   ├── app/                # App router pages
-│   │   │   ├── (auth)/         # sign-in, sign-up
-│   │   │   └── (app)/          # dashboard, workspace, compare, alerts, settings
-│   │   ├── components/         # ui/, layout/, dashboard/, workspace/
-│   │   ├── lib/                # utils, mock data
-│   │   └── store/              # Zustand
-│   └── package.json
-└── backend/
-    ├── app/
-    │   ├── main.py             # FastAPI app + lifespan
-    │   ├── core/               # config, security (Clerk), dependencies
-    │   ├── db/                 # models, schemas, session
-    │   ├── api/routes/         # auth, documents, queries, analytics
-    │   └── services/
-    │       ├── storage.py      # local-filesystem ↔ S3 abstraction
-    │       ├── document/       # extractor, chunker, embedder
-    │       ├── rag/            # pipeline, retriever, reranker, generator, bm25_store
-    │       ├── analytics/      # comparison, anomaly (Week 4 stubs)
-    │       └── aws/            # s3, sqs, comprehend (only used if USE_S3=true)
-    ├── alembic/                # versioned migrations
-    ├── tests/                  # pytest + in-memory SQLite
-    ├── Dockerfile
-    └── requirements.txt
+|-- README.md
+|-- LICENSE
+|-- docker-compose.yml
+|-- frontend/
+|   |-- public/
+|   |   |-- logo.svg            # Full wordmark
+|   |   |-- logo-mark.svg       # Just the fin (sidebar / auth pages)
+|   |   `-- favicon.svg
+|   |-- src/
+|   |   |-- app/                # App Router pages
+|   |   |   |-- (auth)/         # sign-in, sign-up
+|   |   |   `-- (app)/          # dashboard, workspace, compare, alerts, settings
+|   |   |-- components/         # ui/, layout/, dashboard/, workspace/
+|   |   |-- lib/                # utils, mock data
+|   |   `-- store/              # Zustand
+|   `-- package.json
+`-- backend/
+    |-- app/
+    |   |-- main.py             # FastAPI app + lifespan
+    |   |-- core/               # config, security (Clerk), dependencies
+    |   |-- db/                 # models, schemas, session
+    |   |-- api/routes/         # auth, documents, queries, analytics
+    |   `-- services/
+    |       |-- storage.py      # local-filesystem / S3 abstraction
+    |       |-- document/       # extractor, chunker, embedder
+    |       |-- rag/            # pipeline, retriever, reranker, generator, bm25_store
+    |       |-- analytics/      # comparison, anomaly (Week 4 stubs)
+    |       `-- aws/            # s3, sqs, comprehend (only used if USE_S3=true)
+    |-- alembic/                # versioned migrations
+    |-- tests/                  # pytest + in-memory SQLite
+    |-- Dockerfile
+    `-- requirements.txt
 ```
 
 ---
 
-## 🛣 Roadmap
+## Roadmap
 
 - [x] **Week 1** — Auth, DB schema, FastAPI skeleton, health checks
 - [x] **Week 2** — Upload pipeline, S3-or-local storage, PII scan, extraction, chunking
 - [x] **Week 3** — Embeddings, ChromaDB, BM25, RRF, cross-encoder rerank, Groq generator
 - [ ] **Week 4** — Document comparison (metric deltas, risk diff, sentiment), anomaly detection
-- [ ] **Week 5** — Terraform → AWS (ECS Fargate, RDS, real S3+SQS), Datadog APM
-- [ ] **Week 6** — Embeddable widget, Slack/PagerDuty alerts, CSV/Excel ingestion
+- [ ] **Week 5** — Terraform to AWS (ECS Fargate, RDS, real S3 + SQS), Datadog APM
+- [ ] **Week 6** — Embeddable widget, Slack / PagerDuty alerts, CSV / Excel ingestion
 
 ---
 
-## 🪪 License
+## License
 
-MIT
+[MIT](LICENSE) &copy; 2024 Debarghya Sengupta
