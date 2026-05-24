@@ -21,6 +21,9 @@ backend/alembic/__pycache__/
 
 # ── Node / Next.js ────────────────────────────────────────────
 node_modules/
+**/node_modules/
+package-lock.json
+**/package-lock.json
 frontend/.next/
 frontend/out/
 frontend/build/
