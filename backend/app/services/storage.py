@@ -29,7 +29,7 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 
-# ── Local filesystem backend ──────────────────────────────────────────────────
+
 class _LocalStorage:
     """Stores files under LOCAL_STORAGE_PATH using the S3 key as a relative path."""
 

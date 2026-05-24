@@ -1,4 +1,6 @@
 <div align="center">
+
+>>>>>>> 1fedbae (Theme added)
   <img src="frontend/public/logo.svg" alt="Fin-Sight" width="320" />
   <h3>Financial Document Intelligence — 100% Free Stack</h3>
   <p><strong>Upload financial filings &rarr; ask questions &rarr; get cited answers</strong></p>
