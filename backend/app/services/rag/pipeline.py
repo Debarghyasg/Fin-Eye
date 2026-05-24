@@ -1,17 +1,12 @@
 """
-RAG pipeline orchestrator — Week 3.
+RAG pipeline orchestrator — FREE stack.
 
-Full pipeline
--------------
-  retrieve()  →  rerank()  →  generate_answer()  →  log to DB  →  return
+Identical logic to the paid version — only the services underneath changed:
+  retrieve()        → ChromaDB dense + BM25 sparse + RRF
+  rerank()          → cross-encoder/ms-marco-MiniLM-L-6-v2  (local CPU)
+  generate_answer() → Groq Llama 3.1 70B  (free API)
 
-Every query is written to the query_logs table regardless of success/failure.
-This satisfies SEC Rule 17a-4 (immutable audit trail).
-
-Error handling
---------------
-  Each stage is wrapped individually so a reranker failure does not prevent
-  a degraded response (fall back to top-5 by RRF score without reranking).
+Every query is written to query_logs (immutable audit trail).
 """
 from __future__ import annotations
 
@@ -35,16 +30,8 @@ async def run_query_pipeline(
     db: "AsyncSession",
 ) -> "QueryResponse":
     """
-    End-to-end RAG pipeline.
-
-    Steps:
-      1. Retrieve top-20 candidates via hybrid search (Pinecone + BM25 + RRF)
-      2. Rerank top-20 → top-5 using cross-encoder
-      3. Generate cited answer with GPT-4o
-      4. Write immutable QueryLog to DB
-      5. Return QueryResponse
-
-    Raises RuntimeError if OPENAI_API_KEY or PINECONE_API_KEY are not set.
+    End-to-end RAG pipeline (free stack):
+      retrieve → rerank → generate → log → return
     """
     from app.db.models import QueryLog
     from app.db.schemas import QueryResponse, SourceReference
@@ -52,32 +39,26 @@ async def run_query_pipeline(
     from app.services.rag.reranker import rerank
     from app.services.rag.generator import generate_answer
 
-    if not settings.OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not configured in .env")
-    if not settings.PINECONE_API_KEY:
-        raise RuntimeError("PINECONE_API_KEY is not configured in .env")
+    if not settings.GROQ_API_KEY:
+        raise RuntimeError(
+            "GROQ_API_KEY is not set in backend/.env. "
+            "Get a free key at https://console.groq.com"
+        )
 
     t_start = time.perf_counter()
 
-    # ── Stage 1: Retrieve ─────────────────────────────────────────────────────
+    # ── 1. Retrieve ───────────────────────────────────────────────────────────
     try:
         candidates = await retrieve(request, db)
     except Exception as exc:
-        log.exception("Retrieval stage failed: %s", exc)
+        log.exception("Retrieval failed: %s", exc)
         raise RuntimeError(f"Retrieval failed: {exc}") from exc
 
     if not candidates:
-        # No relevant chunks found — return graceful empty answer
         latency_ms = int((time.perf_counter() - t_start) * 1000)
-        return await _build_empty_response(
-            request=request,
-            user_id=user_id,
-            db=db,
-            latency_ms=latency_ms,
-            reason="No relevant documents found in your workspace for this query.",
-        )
+        return await _empty_response(request, user_id, db, latency_ms)
 
-    # ── Stage 2: Rerank ───────────────────────────────────────────────────────
+    # ── 2. Rerank ─────────────────────────────────────────────────────────────
     try:
         reranked = await rerank(
             query=request.query,
@@ -85,39 +66,35 @@ async def run_query_pipeline(
             top_n=settings.RERANKER_TOP_N,
         )
     except Exception as exc:
-        log.warning("Reranker failed — falling back to RRF-ranked results: %s", exc)
-        # Graceful degradation: use top-N by RRF score without cross-encoder
+        log.warning("Reranker failed — using RRF order: %s", exc)
         reranked = candidates[:settings.RERANKER_TOP_N]
-        for chunk in reranked:
-            chunk["rerank_score"] = chunk.get("rrf_score", 0.0)
+        for c in reranked:
+            c["rerank_score"] = c.get("rrf_score", 0.0)
 
-    # ── Stage 3: Generate ─────────────────────────────────────────────────────
+    # ── 3. Generate ───────────────────────────────────────────────────────────
     try:
         generation = await generate_answer(
             query=request.query,
             reranked_chunks=reranked,
-            model=settings.OPENAI_CHAT_MODEL,
+            model=settings.GROQ_MODEL,
         )
     except Exception as exc:
-        log.exception("Generation stage failed: %s", exc)
+        log.exception("Generation failed: %s", exc)
         raise RuntimeError(f"Answer generation failed: {exc}") from exc
 
     latency_ms = int((time.perf_counter() - t_start) * 1000)
 
-    # ── Stage 4: Write audit log ──────────────────────────────────────────────
-    source_chunk_ids = json.dumps([s["chunk_id"] for s in generation["sources"]])
-    source_doc_ids   = json.dumps(
-        list({s["document_id"] for s in generation["sources"]})
-    )
-
+    # ── 4. Write audit log ────────────────────────────────────────────────────
     query_log = QueryLog(
         user_id=user_id,
         workspace_id=request.workspace_id,
         query_text=request.query,
         answer_text=generation["answer"],
         confidence_score=generation["confidence"],
-        source_chunk_ids=source_chunk_ids,
-        source_doc_ids=source_doc_ids,
+        source_chunk_ids=json.dumps([s["chunk_id"] for s in generation["sources"]]),
+        source_doc_ids=json.dumps(
+            list({s["document_id"] for s in generation["sources"]})
+        ),
         latency_ms=latency_ms,
         model_used=generation["model_used"],
     )
@@ -125,11 +102,11 @@ async def run_query_pipeline(
     await db.commit()
 
     log.info(
-        "Query pipeline complete: workspace=%s latency_ms=%d confidence=%.2f",
-        request.workspace_id, latency_ms, generation["confidence"],
+        "Pipeline complete: workspace=%s latency_ms=%d confidence=%.2f model=%s",
+        request.workspace_id, latency_ms,
+        generation["confidence"], generation["model_used"],
     )
 
-    # ── Stage 5: Build response ───────────────────────────────────────────────
     return QueryResponse(
         query_log_id=query_log.id,
         query=request.query,
@@ -150,22 +127,16 @@ async def run_query_pipeline(
     )
 
 
-async def _build_empty_response(
-    request: "QueryRequest",
-    user_id: str,
-    db: "AsyncSession",
-    latency_ms: int,
-    reason: str,
-) -> "QueryResponse":
-    """Return a well-formed empty QueryResponse and log it."""
+async def _empty_response(request, user_id, db, latency_ms):
     from app.db.models import QueryLog
     from app.db.schemas import QueryResponse
 
+    msg = "No relevant documents found in your workspace for this query."
     query_log = QueryLog(
         user_id=user_id,
         workspace_id=request.workspace_id,
         query_text=request.query,
-        answer_text=reason,
+        answer_text=msg,
         confidence_score=0.0,
         source_chunk_ids="[]",
         source_doc_ids="[]",
@@ -178,7 +149,7 @@ async def _build_empty_response(
     return QueryResponse(
         query_log_id=query_log.id,
         query=request.query,
-        answer=reason,
+        answer=msg,
         confidence=0.0,
         sources=[],
         latency_ms=latency_ms,

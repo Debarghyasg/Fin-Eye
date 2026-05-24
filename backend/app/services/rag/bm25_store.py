@@ -1,34 +1,23 @@
 """
-BM25 sparse retrieval store — Week 3.
+BM25 sparse retrieval store — FREE (Redis + rank-bm25).
+
+Unchanged from Week 3 — Redis is already free and runs in Docker.
 
 Architecture
 ------------
-After a document finishes chunking, we:
-  1. Fetch all chunk texts for that workspace from Postgres.
+After chunking a document:
+  1. Fetch ALL chunk texts for the workspace from Postgres.
   2. Build a BM25Okapi index over the entire workspace corpus.
-  3. Serialise the index with pickle and write it to Redis under the key:
-       bm25:{workspace_id}
-  4. Set TTL = 7 days (REDIS_BM25_TTL). The index is rebuilt on every
-     new document or deletion so it stays fresh.
+  3. Pickle the index + chunk_id mapping → store in Redis under bm25:{workspace_id}.
+  4. TTL = 7 days. Rebuilt on every document add or delete.
 
 At query time:
-  1. Load the serialised index from Redis (cache hit ~1 ms).
-  2. Tokenise the query and score all documents in the corpus.
-  3. Return the top-k (chunk_id, score) pairs.
+  1. Load from Redis (cache hit ~1 ms).
+  2. Tokenise + score the query.
+  3. Return top-k (chunk_id, score, rank) pairs to the retriever.
 
-Why workspace-level (not document-level)?
-  Financial queries often span multiple documents ("compare AAPL FY22 vs FY23").
-  A workspace-level BM25 index allows cross-document sparse retrieval without
-  having to merge separate per-document indices at query time.
-
-Key design choices
-------------------
-- Tokenisation: simple whitespace + lowercase. Good enough for financial text
-  with product codes, tickers, and dollar amounts. Swap for a proper tokeniser
-  (e.g. nltk word_tokenize) if recall needs improving.
-- Pickle: faster than JSON for large numpy arrays. Stored in Redis bytes field.
-- TTL: 7 days. Rebuilt on every document add/delete, so the TTL is just a
-  safety net for stale data.
+The chunk_id stored in the BM25 corpus matches the pinecone_id column in Postgres
+(format: "{document_id}_{chunk_index}") — same ID used by ChromaDB.
 """
 from __future__ import annotations
 
@@ -44,21 +33,19 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# ── Redis client singleton ────────────────────────────────────────────────────
 _redis_client = None
 
 
 async def _get_redis():
-    """Return a cached async Redis client."""
     global _redis_client
     if _redis_client is None:
         import redis.asyncio as aioredis
         _redis_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
-            decode_responses=False,   # we store raw bytes (pickle)
+            decode_responses=False,
         )
-        log.info("Redis client connected to %s", settings.REDIS_URL)
+        log.info("Redis connected: %s", settings.REDIS_URL)
     return _redis_client
 
 
@@ -66,33 +53,24 @@ def _redis_key(workspace_id: str) -> str:
     return f"bm25:{workspace_id}"
 
 
-# ── Tokeniser ─────────────────────────────────────────────────────────────────
 def _tokenise(text: str) -> list[str]:
-    """
-    Simple whitespace tokeniser with lowercasing.
-    Keeps tickers, dollar amounts, and numeric strings intact.
-    """
+    """Simple whitespace tokeniser — keeps tickers and dollar amounts intact."""
     return text.lower().split()
 
 
-# ── Build and persist BM25 index ──────────────────────────────────────────────
 async def build_and_store_bm25(
     workspace_id: str,
     db: "AsyncSession",
 ) -> int:
     """
-    Rebuild the BM25 index for an entire workspace and store it in Redis.
+    Rebuild the BM25 index for an entire workspace and cache in Redis.
 
-    Called after:
-      - A document finishes chunking (add new chunks to corpus)
-      - A document is deleted (remove chunks from corpus)
-
-    Returns the number of chunks indexed.
+    Called after every document add or delete.
+    Returns number of chunks indexed (0 means cache was cleared).
     """
     from sqlalchemy import select
     from app.db.models import Chunk, Document
 
-    # ── Fetch all chunk texts for the workspace ───────────────────────────────
     result = await db.execute(
         select(Chunk.id, Chunk.text)
         .join(Document, Chunk.document_id == Document.id)
@@ -102,26 +80,23 @@ async def build_and_store_bm25(
     rows = result.all()
 
     if not rows:
-        log.info("No chunks found for workspace %s — clearing BM25 cache", workspace_id)
         r = await _get_redis()
         await r.delete(_redis_key(workspace_id))
+        log.info("BM25 cache cleared for workspace %s (no chunks)", workspace_id)
         return 0
 
-    chunk_ids = [row[0] for row in rows]
-    corpus_texts = [row[1] for row in rows]
+    chunk_ids     = [row[0] for row in rows]
+    corpus_texts  = [row[1] for row in rows]
 
-    # ── Build BM25 index (CPU-bound — run in thread) ──────────────────────────
-    def _build(texts: list[str]) -> object:
+    def _build(texts: list[str]):
         from rank_bm25 import BM25Okapi
-        tokenised = [_tokenise(t) for t in texts]
-        return BM25Okapi(tokenised)
+        return BM25Okapi([_tokenise(t) for t in texts])
 
     bm25_index = await asyncio.to_thread(_build, corpus_texts)
 
-    # ── Serialise and store in Redis ──────────────────────────────────────────
     payload = pickle.dumps({
-        "index":      bm25_index,
-        "chunk_ids":  chunk_ids,       # positional mapping: index i → chunk_id
+        "index":        bm25_index,
+        "chunk_ids":    chunk_ids,
         "workspace_id": workspace_id,
     })
 
@@ -129,13 +104,12 @@ async def build_and_store_bm25(
     await r.setex(_redis_key(workspace_id), settings.REDIS_BM25_TTL, payload)
 
     log.info(
-        "BM25 index built: workspace=%s chunks=%d size_bytes=%d",
+        "BM25 index built: workspace=%s chunks=%d bytes=%d",
         workspace_id, len(chunk_ids), len(payload),
     )
     return len(chunk_ids)
 
 
-# ── Query BM25 index ──────────────────────────────────────────────────────────
 async def query_bm25(
     query: str,
     workspace_id: str,
@@ -143,57 +117,41 @@ async def query_bm25(
     document_ids: list[str] | None = None,
 ) -> list[dict]:
     """
-    Score the query against the workspace BM25 corpus.
+    Score query against the workspace BM25 corpus from Redis.
 
-    Returns a list of up to top_k dicts:
-        [{"chunk_id": "...", "score": 3.14, "rank": 0}, ...]
-
-    If the index is not in Redis (cache miss), returns an empty list —
-    the caller falls back to dense-only retrieval.
-
-    `document_ids` — if provided, only return chunks from those documents.
-    We can't filter inside BM25 natively, so we retrieve more and filter after.
+    Returns up to top_k dicts: [{"chunk_id": "...", "score": 3.14, "rank": 0}, ...]
+    Returns [] on cache miss (caller falls back to dense-only).
     """
-    r = await _get_redis()
+    r   = await _get_redis()
     raw = await r.get(_redis_key(workspace_id))
 
     if raw is None:
-        log.warning(
-            "BM25 cache miss for workspace %s — skipping sparse retrieval", workspace_id
-        )
+        log.warning("BM25 cache miss for workspace %s", workspace_id)
         return []
 
-    payload = pickle.loads(raw)
+    payload    = pickle.loads(raw)
     bm25_index = payload["index"]
     chunk_ids: list[str] = payload["chunk_ids"]
 
-    # ── Score (CPU-bound) ─────────────────────────────────────────────────────
-    def _score(query_text: str) -> list[float]:
-        tokens = _tokenise(query_text)
-        return bm25_index.get_scores(tokens).tolist()
+    def _score(q: str) -> list[float]:
+        return bm25_index.get_scores(_tokenise(q)).tolist()
 
     scores = await asyncio.to_thread(_score, query)
 
-    # ── Build ranked list ─────────────────────────────────────────────────────
     scored = [
         {"chunk_id": cid, "score": float(s), "rank": 0}
         for cid, s in zip(chunk_ids, scores)
-        if s > 0   # skip zero-score chunks (no keyword overlap)
+        if s > 0
     ]
 
-    # Optional document filter
     if document_ids:
         doc_set = set(document_ids)
-        # chunk_id format is "{document_id}_{chunk_index}" — extract doc prefix
-        scored = [
+        scored  = [
             item for item in scored
             if any(item["chunk_id"].startswith(did) for did in doc_set)
         ]
 
-    # Sort descending by score
     scored.sort(key=lambda x: x["score"], reverse=True)
-
-    # Assign rank (0-based)
     for i, item in enumerate(scored):
         item["rank"] = i
 

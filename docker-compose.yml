@@ -1,7 +1,26 @@
 version: "3.9"
 
+# ════════════════════════════════════════════════════════════════
+#  FinSight AI — 100% FREE local development stack
+#
+#  Services
+#  ────────
+#  db          PostgreSQL 16     → port 5432
+#  redis       Redis 7           → port 6379  (BM25 cache)
+#  chromadb    ChromaDB 0.5      → port 8001  (vector store, FREE)
+#  api         FastAPI           → port 8000
+#  localstack  LocalStack 3      → port 4566  (optional S3/SQS mock)
+#
+#  Start everything:
+#    docker-compose up
+#
+#  Start without LocalStack (saves ~300 MB RAM):
+#    docker-compose up db redis chromadb api
+# ════════════════════════════════════════════════════════════════
+
 services:
-  # ── PostgreSQL ─────────────────────────────────────────────────
+
+  # ── PostgreSQL ──────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: finsight_db
@@ -20,33 +39,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── FastAPI backend ────────────────────────────────────────────
-  api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: finsight_api
-    restart: unless-stopped
-    env_file:
-      - ./backend/.env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finsight}:${POSTGRES_PASSWORD:-finsight_dev}@db:5432/${POSTGRES_DB:-finsight}
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app          # live-reload in dev
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: >
-      uvicorn app.main:app
-      --host 0.0.0.0
-      --port 8000
-      --reload
-
-  # ── Redis (BM25 index cache) ───────────────────────────────────
+  # ── Redis (BM25 sparse index cache) ────────────────────────
   redis:
     image: redis:7-alpine
     container_name: finsight_redis
@@ -60,14 +53,68 @@ services:
       timeout: 3s
       retries: 10
 
-  # ── LocalStack (mock AWS S3 + SQS for local dev) ───────────────
+  # ── ChromaDB (FREE vector store — replaces Pinecone) ────────
+  chromadb:
+    image: chromadb/chroma:0.5.0
+    container_name: finsight_chromadb
+    restart: unless-stopped
+    ports:
+      - "8001:8000"          # ChromaDB listens on 8000 inside container
+    volumes:
+      - chromadata:/chroma/chroma   # persistent vector data
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI backend ─────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finsight_api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finsight}:${POSTGRES_PASSWORD:-finsight_dev}@db:5432/${POSTGRES_DB:-finsight}
+      REDIS_URL: redis://redis:6379/0
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000        # inside Docker network, ChromaDB is on 8000
+      LOCAL_STORAGE_PATH: /app/uploads
+      USE_S3: "false"
+      USE_SQS: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app          # live-reload in dev
+      - uploads:/app/uploads    # persistent file storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+
+  # ── LocalStack (optional mock AWS — only needed if USE_S3=true) ─
   localstack:
     image: localstack/localstack:3
     container_name: finsight_localstack
+    profiles: ["aws"]        # only starts with: docker-compose --profile aws up
     ports:
       - "4566:4566"
     environment:
-      SERVICES: s3,sqs,comprehend
+      SERVICES: s3,sqs
       DEFAULT_REGION: us-east-1
       DEBUG: 0
     volumes:
@@ -75,4 +122,6 @@ services:
 
 volumes:
   pgdata:
+  chromadata:
+  uploads:
   localstack_data:

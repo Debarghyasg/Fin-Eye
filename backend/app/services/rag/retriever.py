@@ -1,27 +1,22 @@
 """
-Hybrid retriever — Week 3.
+Hybrid retriever — FREE stack.
 
 Pipeline
 --------
-1. Dense retrieval  — embed query → Pinecone top-20 (filtered by workspace namespace)
-2. Sparse retrieval — BM25 top-20 from Redis-cached workspace corpus
-3. RRF merge        — Reciprocal Rank Fusion of both ranked lists → top-20 candidates
-4. Return candidates to the reranker (with full text fetched from DB)
+1. Dense  — embed query locally → ChromaDB top-20 (filtered by workspace_id)
+2. Sparse — BM25 top-20 from Redis-cached workspace corpus
+3. RRF    — Reciprocal Rank Fusion → merged top-20 candidates
+4. Enrich — fetch full chunk text from Postgres
 
-Reciprocal Rank Fusion formula
--------------------------------
-  RRF_score(d) = Σ  1 / (k + rank_i(d))
-                 i
+ChromaDB filtering
+------------------
+ChromaDB supports metadata filters via the `where` dict.
+We filter by workspace_id so each workspace only sees its own documents.
+Optional document_ids filter is applied as a second `where` clause.
 
-  Where k = 60 (standard constant), rank_i(d) is the 1-based rank of document d
-  in result list i (dense or sparse). Documents not in a list get rank = ∞ (score 0).
-
-  Reference: Cormack, Clarke, Buettcher (SIGIR 2009).
-
-Why namespace = workspace_id?
-------------------------------
-  Each workspace gets its own Pinecone namespace. This gives free per-workspace
-  isolation without needing a separate index or metadata filter.
+RRF formula  (Cormack, Clarke, Buettcher — SIGIR 2009)
+-------------------------------------------------------
+  score(d) = Σ  1 / (k + rank_i(d))      k = 60
 """
 from __future__ import annotations
 
@@ -41,56 +36,61 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# ── Dense retrieval ───────────────────────────────────────────────────────────
+# ── Local embedding of a query ────────────────────────────────────────────────
 def _embed_query(query: str) -> list[float]:
-    """Embed a single query string using OpenAI text-embedding-3-large."""
-    from openai import OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    response = client.embeddings.create(
-        model=settings.OPENAI_EMBEDDING_MODEL,
-        input=[query],
-        encoding_format="float",
-    )
-    return response.data[0].embedding
+    """Embed a single query string with the local SentenceTransformer model."""
+    from app.services.document.embedder import _get_embed_model
+    model = _get_embed_model()
+    return model.encode([query], show_progress_bar=False)[0].tolist()
 
 
-def _pinecone_query(
+# ── ChromaDB dense retrieval ──────────────────────────────────────────────────
+def _chroma_query(
     vector: list[float],
-    namespace: str,
+    workspace_id: str,
     top_k: int,
-    filter_doc_ids: list[str] | None,
+    document_ids: list[str] | None,
 ) -> list[dict]:
     """
-    Query Pinecone for nearest neighbours.
+    Query ChromaDB for nearest neighbours filtered by workspace_id.
 
     Returns list of dicts:
-        [{"chunk_id": "...", "score": 0.92, "metadata": {...}}, ...]
-    """
-    from pinecone import Pinecone
-    pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-    index = pc.Index(settings.PINECONE_INDEX_NAME)
+        [{"chunk_id": "doc123_0", "score": 0.91, "metadata": {...}}, ...]
 
-    query_kwargs: dict = dict(
-        vector=vector,
-        top_k=top_k,
-        namespace=namespace,
-        include_metadata=True,
+    ChromaDB returns distance (lower = closer for cosine).
+    We convert: score = 1 - distance  so higher = better.
+    """
+    from app.services.document.embedder import _get_collection
+    collection = _get_collection()
+
+    where: dict = {"workspace_id": {"$eq": workspace_id}}
+    if document_ids:
+        where = {
+            "$and": [
+                {"workspace_id": {"$eq": workspace_id}},
+                {"document_id":  {"$in": document_ids}},
+            ]
+        }
+
+    results = collection.query(
+        query_embeddings=[vector],
+        n_results=min(top_k, collection.count() or 1),
+        where=where,
+        include=["metadatas", "distances", "documents"],
     )
 
-    # Optional: filter by specific document IDs
-    if filter_doc_ids:
-        query_kwargs["filter"] = {"document_id": {"$in": filter_doc_ids}}
-
-    response = index.query(**query_kwargs)
+    ids        = results["ids"][0]
+    distances  = results["distances"][0]
+    metadatas  = results["metadatas"][0]
 
     return [
         {
-            "chunk_id": match["id"],
-            "score":    float(match["score"]),
-            "metadata": match.get("metadata", {}),
+            "chunk_id": cid,
+            "score":    max(0.0, 1.0 - dist),   # cosine similarity
+            "metadata": meta,
             "rank":     i,
         }
-        for i, match in enumerate(response.get("matches", []))
+        for i, (cid, dist, meta) in enumerate(zip(ids, distances, metadatas))
     ]
 
 
@@ -100,20 +100,11 @@ def _rrf_merge(
     sparse_results: list[dict],
     k: int = 60,
 ) -> list[dict]:
-    """
-    Merge dense + sparse ranked lists using Reciprocal Rank Fusion.
-
-    Returns a single merged list sorted by descending RRF score.
-    Each item in the output carries both its dense and sparse scores
-    for debugging / explainability.
-    """
     scores: dict[str, dict] = {}
 
-    # Dense contribution
     for item in dense_results:
-        cid = item["chunk_id"]
-        rank = item["rank"] + 1   # 1-based
-        rrf = 1.0 / (k + rank)
+        cid  = item["chunk_id"]
+        rank = item["rank"] + 1
         if cid not in scores:
             scores[cid] = {
                 "chunk_id":     cid,
@@ -122,67 +113,58 @@ def _rrf_merge(
                 "sparse_score": 0.0,
                 "metadata":     item.get("metadata", {}),
             }
-        scores[cid]["rrf_score"]   += rrf
-        scores[cid]["dense_score"]  = item["score"]
+        scores[cid]["rrf_score"]  += 1.0 / (k + rank)
+        scores[cid]["dense_score"] = item["score"]
 
-    # Sparse contribution
     for item in sparse_results:
-        cid = item["chunk_id"]
-        rank = item["rank"] + 1   # 1-based
-        rrf = 1.0 / (k + rank)
+        cid  = item["chunk_id"]
+        rank = item["rank"] + 1
         if cid not in scores:
             scores[cid] = {
                 "chunk_id":     cid,
                 "rrf_score":    0.0,
                 "dense_score":  0.0,
                 "sparse_score": 0.0,
-                "metadata":     {},    # no metadata from BM25 — fetch from DB later
+                "metadata":     {},
             }
-        scores[cid]["rrf_score"]    += rrf
-        scores[cid]["sparse_score"]  = item["score"]
+        scores[cid]["rrf_score"]   += 1.0 / (k + rank)
+        scores[cid]["sparse_score"] = item["score"]
 
-    merged = sorted(scores.values(), key=lambda x: x["rrf_score"], reverse=True)
-    return merged
+    return sorted(scores.values(), key=lambda x: x["rrf_score"], reverse=True)
 
 
-# ── Fetch chunk text + DB metadata for candidates ────────────────────────────
+# ── Enrich candidates with full text from Postgres ────────────────────────────
 async def _enrich_with_db(
     candidates: list[dict],
     db: "AsyncSession",
 ) -> list[dict]:
-    """
-    For candidates that don't have full text in Pinecone metadata (truncated at
-    1000 chars), fetch the full text from Postgres.
-
-    Also attaches the DB chunk_id (UUID) and document relationship data.
-    """
     from app.db.models import Chunk
 
-    pinecone_ids = [c["chunk_id"] for c in candidates]
+    chroma_ids = [c["chunk_id"] for c in candidates]
     result = await db.execute(
-        select(Chunk).where(Chunk.pinecone_id.in_(pinecone_ids))
+        select(Chunk).where(Chunk.pinecone_id.in_(chroma_ids))
     )
     db_chunks = {chunk.pinecone_id: chunk for chunk in result.scalars().all()}
 
     enriched = []
     for candidate in candidates:
-        pid = candidate["chunk_id"]
-        db_chunk = db_chunks.get(pid)
+        cid      = candidate["chunk_id"]
+        db_chunk = db_chunks.get(cid)
         if db_chunk is None:
-            # Chunk in Pinecone but not in DB (shouldn't happen) — skip
-            log.warning("Pinecone id %r not found in DB — skipping", pid)
+            # In ChromaDB but not in DB — skip (shouldn't happen in normal flow)
+            log.warning("ChromaDB id %r not found in DB — skipping", cid)
             continue
         enriched.append({
-            "chunk_id":      db_chunk.id,          # DB UUID
-            "pinecone_id":   pid,
-            "document_id":   db_chunk.document_id,
-            "text":          db_chunk.text,         # full text from DB
-            "chunk_type":    db_chunk.chunk_type,
-            "page_number":   db_chunk.page_number,
-            "source_section":db_chunk.source_section,
-            "rrf_score":     candidate["rrf_score"],
-            "dense_score":   candidate["dense_score"],
-            "sparse_score":  candidate["sparse_score"],
+            "chunk_id":       db_chunk.id,
+            "chroma_id":      cid,
+            "document_id":    db_chunk.document_id,
+            "text":           db_chunk.text,
+            "chunk_type":     db_chunk.chunk_type,
+            "page_number":    db_chunk.page_number,
+            "source_section": db_chunk.source_section,
+            "rrf_score":      candidate["rrf_score"],
+            "dense_score":    candidate["dense_score"],
+            "sparse_score":   candidate["sparse_score"],
         })
 
     return enriched
@@ -195,52 +177,42 @@ async def retrieve(
     top_k: int | None = None,
 ) -> list[dict]:
     """
-    Hybrid retrieval: dense (Pinecone) + sparse (BM25) → RRF merge → top-k.
-
-    Returns a list of enriched candidate dicts ready for the reranker:
-        [{
-            "chunk_id":      "<db-uuid>",
-            "document_id":   "...",
-            "text":          "full chunk text",
-            "chunk_type":    "prose"|"table"|"header",
-            "page_number":   3,
-            "source_section":"Risk Factors",
-            "rrf_score":     0.031,
-            "dense_score":   0.87,
-            "sparse_score":  4.2,
-        }, ...]
+    Hybrid retrieval: ChromaDB dense + BM25 sparse → RRF → top-k enriched candidates.
     """
-    top_k = top_k or settings.RETRIEVER_TOP_K
-    namespace = request.workspace_id
-    doc_ids = request.document_ids or None
+    top_k     = top_k or settings.RETRIEVER_TOP_K
+    doc_ids   = request.document_ids or None
 
-    # ── 1. Embed query ────────────────────────────────────────────────────────
+    # 1. Embed query locally
     query_vector = await asyncio.to_thread(_embed_query, request.query)
 
-    # ── 2. Dense retrieval (Pinecone) ─────────────────────────────────────────
-    dense_results = await asyncio.to_thread(
-        _pinecone_query, query_vector, namespace, top_k, doc_ids
-    )
-    log.debug("Dense retrieval: %d results for query %r", len(dense_results), request.query[:80])
+    # 2. Dense retrieval (ChromaDB)
+    try:
+        dense_results = await asyncio.to_thread(
+            _chroma_query, query_vector, request.workspace_id, top_k, doc_ids
+        )
+    except Exception as exc:
+        log.warning("ChromaDB query failed: %s — dense results empty", exc)
+        dense_results = []
 
-    # ── 3. Sparse retrieval (BM25 from Redis) ─────────────────────────────────
+    log.debug("Dense: %d results", len(dense_results))
+
+    # 3. Sparse retrieval (BM25 from Redis)
     sparse_results = await query_bm25(
         query=request.query,
         workspace_id=request.workspace_id,
         top_k=top_k,
         document_ids=doc_ids,
     )
-    log.debug("Sparse retrieval: %d results", len(sparse_results))
+    log.debug("Sparse: %d results", len(sparse_results))
 
-    # ── 4. RRF merge ──────────────────────────────────────────────────────────
+    # 4. RRF merge
     merged = _rrf_merge(dense_results, sparse_results, k=settings.RRF_K)
-    log.debug("RRF merged: %d unique candidates", len(merged))
 
-    # ── 5. Enrich with full text from DB ──────────────────────────────────────
+    # 5. Enrich with full text from Postgres
     candidates = await _enrich_with_db(merged[:top_k], db)
 
     log.info(
-        "Retrieval complete: query=%r workspace=%s candidates=%d",
+        "Retrieval: query=%r workspace=%s candidates=%d",
         request.query[:60], request.workspace_id, len(candidates),
     )
     return candidates

@@ -1,11 +1,21 @@
 """
 Pydantic Settings — all configuration loaded from environment variables / .env file.
-Every downstream module imports `settings` from here. No raw os.getenv() calls elsewhere.
+100% free stack — no paid services required.
+
+Free service map
+----------------
+  LLM          : Groq  (Llama 3.1 70B — 14,400 req/day free)
+  Embeddings   : HuggingFace sentence-transformers/all-MiniLM-L6-v2  (local, CPU)
+  Vector store : ChromaDB  (runs in Docker, persistent on disk)
+  BM25 cache   : Redis  (in Docker)
+  File storage : Local filesystem  (Docker volume)
+  Queue        : In-process asyncio  (no SQS needed)
+  PII scan     : Regex fallback  (no Comprehend needed)
 """
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,7 +36,6 @@ class Settings(BaseSettings):
 
     # ── API ───────────────────────────────────────────────────────
     API_V1_PREFIX: str = "/api/v1"
-    # Comma-separated origins allowed by CORS
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     @property
@@ -36,9 +45,8 @@ class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────────
     DATABASE_URL: str = Field(
         default="postgresql+asyncpg://finsight:finsight_dev@localhost:5432/finsight",
-        description="Async SQLAlchemy connection string (asyncpg driver).",
     )
-    # Sync URL used ONLY by Alembic CLI (psycopg2)
+
     @property
     def sync_database_url(self) -> str:
         return self.DATABASE_URL.replace(
@@ -49,61 +57,63 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
 
+    # ── PostgreSQL (Docker Compose) ────────────────────────────────
+    POSTGRES_USER: str = "finsight"
+    POSTGRES_PASSWORD: str = "finsight_dev"
+    POSTGRES_DB: str = "finsight"
+
     # ── Clerk Auth ────────────────────────────────────────────────
-    CLERK_SECRET_KEY: str = Field(default="", description="sk_test_… from Clerk dashboard")
-    CLERK_PUBLISHABLE_KEY: str = Field(default="", description="pk_test_… from Clerk dashboard")
-    # Clerk JWKS endpoint — used to verify JWT signatures
+    CLERK_SECRET_KEY: str = ""
+    CLERK_PUBLISHABLE_KEY: str = ""
     CLERK_JWKS_URL: str = "https://api.clerk.dev/v1/jwks"
-    # Expected audience in the JWT (your Clerk frontend API URL)
-    CLERK_JWT_AUDIENCE: str = Field(default="", description="e.g. https://your-app.clerk.accounts.dev")
+    CLERK_JWT_AUDIENCE: str = ""
 
-    # ── AWS ───────────────────────────────────────────────────────
+    # ── FREE: Groq LLM ────────────────────────────────────────────
+    # Sign up free at https://console.groq.com
+    # Free tier: 14,400 requests/day, 6,000 tokens/min
+    GROQ_API_KEY: str = Field(default="", description="gsk_... from console.groq.com")
+    GROQ_MODEL: str = "llama-3.1-70b-versatile"   # best free model
+    GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"  # faster fallback
+
+    # ── FREE: Local embeddings (HuggingFace) ──────────────────────
+    # No account, no API key — runs entirely on CPU in Docker
+    # Model downloads ~90 MB on first run, cached in /app/.cache
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_DIMENSION: int = 384   # fixed for all-MiniLM-L6-v2
+
+    # ── FREE: ChromaDB vector store ───────────────────────────────
+    # Runs as a service in Docker Compose, data persisted on disk
+    CHROMA_HOST: str = "localhost"
+    CHROMA_PORT: int = 8001
+    CHROMA_COLLECTION: str = "finsight_chunks"
+
+    # ── FREE: Redis (BM25 cache) ──────────────────────────────────
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_BM25_TTL: int = 604800  # 7 days
+
+    # ── FREE: Local file storage ──────────────────────────────────
+    # Files stored on Docker volume instead of S3
+    # Set USE_S3=true to switch back to real S3 when ready
+    USE_S3: bool = False
+    LOCAL_STORAGE_PATH: str = "/app/uploads"
+
+    # AWS (optional — only used when USE_S3=true)
     AWS_REGION: str = "us-east-1"
-    AWS_ACCESS_KEY_ID: str = Field(default="test", description="Use 'test' for LocalStack")
-    AWS_SECRET_ACCESS_KEY: str = Field(default="test", description="Use 'test' for LocalStack")
-    # Set to http://localhost:4566 for LocalStack, leave empty for real AWS
+    AWS_ACCESS_KEY_ID: str = "test"
+    AWS_SECRET_ACCESS_KEY: str = "test"
     AWS_ENDPOINT_URL: str | None = None
-
-    # S3
     S3_BUCKET_NAME: str = "finsight-documents"
-    S3_PRESIGNED_URL_EXPIRY: int = 3600  # seconds
+    S3_PRESIGNED_URL_EXPIRY: int = 3600
 
-    # SQS
-    SQS_DOCUMENT_QUEUE_URL: str = Field(
-        default="http://localhost:4566/000000000000/finsight-documents",
-        description="SQS queue URL for async document processing events",
-    )
+    # SQS (optional — tasks run in-process in free mode)
+    USE_SQS: bool = False
+    SQS_DOCUMENT_QUEUE_URL: str = "http://localhost:4566/000000000000/finsight-documents"
 
-    # ── OpenAI ────────────────────────────────────────────────────
-    OPENAI_API_KEY: str = Field(default="", description="sk-… from OpenAI dashboard")
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
-    OPENAI_CHAT_MODEL: str = "gpt-4o"
-
-    # ── Pinecone ──────────────────────────────────────────────────
-    PINECONE_API_KEY: str = ""
-    PINECONE_ENVIRONMENT: str = "gcp-starter"
-    PINECONE_INDEX_NAME: str = "finsight-docs"
-    PINECONE_DIMENSION: int = 3072        # must match text-embedding-3-large
-    PINECONE_METRIC: str = "cosine"
-    # Pinecone serverless cloud + region (us-east-1 free tier)
-    PINECONE_CLOUD: str = "aws"
-    PINECONE_REGION: str = "us-east-1"
-
-    # ── Redis ─────────────────────────────────────────────────────
-    REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL — redis://host:port/db",
-    )
-    # BM25 index TTL in Redis (7 days — rebuilt on re-index)
-    REDIS_BM25_TTL: int = 604800
-
-    # ── Re-ranker ─────────────────────────────────────────────────
+    # ── Re-ranker (cross-encoder, local CPU) ──────────────────────
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    RERANKER_TOP_N: int = 5              # final chunks sent to LLM after rerank
-    RETRIEVER_TOP_K: int = 20            # candidates fetched before rerank
-
-    # ── RRF ───────────────────────────────────────────────────────
-    RRF_K: int = 60                      # RRF constant (standard = 60)
+    RERANKER_TOP_N: int = 5
+    RETRIEVER_TOP_K: int = 20
+    RRF_K: int = 60
 
     # ── Document processing ───────────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = 50
@@ -126,9 +136,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Cached settings singleton — import this everywhere."""
     return Settings()
 
 
-# Module-level convenience alias
 settings: Settings = get_settings()

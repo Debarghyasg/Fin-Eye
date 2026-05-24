@@ -54,7 +54,7 @@ from app.db.schemas import (
     DocumentUploadResponse,
     PaginatedList,
 )
-from app.services.aws import s3, sqs
+from app.services.storage import storage
 from app.services.aws.comprehend import scan_for_pii
 
 log = logging.getLogger(__name__)
@@ -106,8 +106,8 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             doc.status = DocumentStatus.EXTRACTING
             await db.commit()
 
-            # ── 2. Download from S3 ───────────────────────────────────────────
-            file_bytes = await asyncio.to_thread(s3.download_fileobj, s3_key)
+            # ── 2. Download from storage ──────────────────────────────────────
+            file_bytes = await asyncio.to_thread(storage.download, s3_key)
 
             # ── 3. Extract text + tables ──────────────────────────────────────
             extraction = await asyncio.to_thread(
@@ -116,9 +116,9 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             doc.page_count = extraction.page_count
             doc.status = DocumentStatus.EXTRACTED
 
-            # Write extracted JSON back to S3
-            extracted_key = s3.extracted_key(document_id)
-            await asyncio.to_thread(s3.upload_json, extraction.to_dict(), extracted_key)
+            # Write extracted JSON back to storage
+            extracted_key = storage.extracted_key(document_id)
+            await asyncio.to_thread(storage.upload_json, extraction.to_dict(), extracted_key)
             doc.s3_key_extracted = extracted_key
             await db.commit()
 
@@ -284,19 +284,19 @@ async def upload_document(
     document_id = doc.id
 
     # ── Upload to S3 ──────────────────────────────────────────────────────────
-    original_s3_key = s3.original_key(document_id, file.filename or "upload")
+    original_s3_key = storage.original_key(document_id, file.filename or "upload")
     try:
         await asyncio.to_thread(
-            s3.upload_fileobj,
+            storage.upload,
             file_bytes,
             original_s3_key,
             mime_type,
             {"document_id": document_id, "uploaded_by": current_user.clerk_user_id},
         )
     except Exception as exc:
-        log.error("S3 upload failed for document_id=%s: %s", document_id, exc)
+        log.error("Storage upload failed for document_id=%s: %s", document_id, exc)
         doc.status = DocumentStatus.FAILED
-        doc.error_message = f"S3 upload failed: {exc}"
+        doc.error_message = f"Storage upload failed: {exc}"
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -321,14 +321,16 @@ async def upload_document(
 
     await db.commit()
 
-    # ── Publish SQS event (fire-and-forget) ───────────────────────────────────
-    try:
-        await asyncio.to_thread(
-            sqs.publish_document_uploaded,
-            document_id, workspace_id, original_s3_key, mime_type,
-        )
-    except Exception as exc:
-        log.warning("SQS publish failed — running pipeline inline: %s", exc)
+    # ── Publish SQS event (only when USE_SQS=true) ────────────────────────────
+    if settings.USE_SQS:
+        try:
+            from app.services.aws import sqs
+            await asyncio.to_thread(
+                sqs.publish_document_uploaded,
+                document_id, workspace_id, original_s3_key, mime_type,
+            )
+        except Exception as exc:
+            log.warning("SQS publish failed: %s", exc)
 
     # ── Kick off background pipeline (local dev) ──────────────────────────────
     background_tasks.add_task(
@@ -538,12 +540,12 @@ async def delete_document(
     chunk_count = count_result.scalar_one()
     workspace_id = doc.workspace_id
 
-    # ── Delete S3 objects (best-effort) ───────────────────────────────────────
+    # ── Delete storage objects (best-effort) ──────────────────────────────────
     for s3_key in filter(None, [doc.s3_key_original, doc.s3_key_extracted]):
         try:
-            await asyncio.to_thread(s3.delete_object, s3_key)
+            await asyncio.to_thread(storage.delete, s3_key)
         except Exception as exc:
-            log.warning("S3 delete failed for key %r: %s", s3_key, exc)
+            log.warning("Storage delete failed for key %r: %s", s3_key, exc)
 
     # ── Delete Pinecone vectors (best-effort) ─────────────────────────────────
     if chunk_count > 0:
