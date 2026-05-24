@@ -9,6 +9,7 @@
     <img alt="ChromaDB"   src="https://img.shields.io/badge/ChromaDB-0.5-FF6B6B?style=flat" />
     <img alt="Groq"       src="https://img.shields.io/badge/Groq-Llama_3.1_70B-F97316?style=flat" />
     <img alt="Cost"       src="https://img.shields.io/badge/Cost-%240%2Fmonth-22c55e?style=flat" />
+    <img alt="License"    src="https://img.shields.io/badge/License-Proprietary-red?style=flat" />
   </p>
 </div>
 
@@ -292,4 +293,15 @@ Fin-Eye/
 
 ## License
 
-[MIT](LICENSE) &copy; 2024 Debarghya Sengupta
+**Proprietary &mdash; All Rights Reserved.**
+
+Copyright &copy; 2024 **Debarghya Sengupta**.
+
+This software is the exclusive property of the author. Forking, copying,
+modifying, redistributing, or commercial use of this repository in any
+form is **strictly prohibited** without prior written permission.
+
+You may view the source code on GitHub for the purposes of code review
+and learning. All other rights are reserved.
+
+For licensing enquiries see the full [LICENSE](LICENSE) file.

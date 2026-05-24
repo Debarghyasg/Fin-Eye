@@ -1,21 +1,93 @@
-MIT License
+PROPRIETARY SOFTWARE LICENSE
+============================
 
-Copyright (c) 2024 Debarghya Sengupta
+Copyright (c) 2024 Debarghya Sengupta. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software and its associated documentation files (the "Software"),
+including the Fin-Sight name, logo, source code, design assets, database
+schemas, configuration files, and all other content in this repository,
+are the exclusive property of Debarghya Sengupta (the "Author").
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. RESTRICTIONS
+---------------
+The following actions are STRICTLY PROHIBITED without prior written
+permission from the Author:
+
+   (a) Copying, cloning, downloading, or reproducing the Software in
+       whole or in part by any means, except for the purposes of code
+       review on GitHub through the official repository interface.
+
+   (b) Forking the repository on GitHub, GitLab, Bitbucket, or any other
+       version control hosting platform.
+
+   (c) Modifying, adapting, translating, or creating derivative works
+       based upon the Software.
+
+   (d) Redistributing, publishing, sublicensing, leasing, renting,
+       lending, or otherwise transferring the Software to any third
+       party in any form.
+
+   (e) Using the Software, in whole or in part, for any commercial
+       purpose, including but not limited to selling, hosting as a
+       paid service, or incorporating it into a commercial product.
+
+   (f) Reverse engineering, decompiling, or disassembling any
+       compiled or built artefacts derived from the Software.
+
+   (g) Removing, altering, or obscuring any copyright, trademark, or
+       other proprietary notices contained in the Software.
+
+
+2. PERMITTED USE
+----------------
+You MAY:
+
+   - View the source code on the official GitHub repository for the
+     sole purpose of reading, learning, and reviewing.
+   - Reference the Software in academic citations, articles, blog
+     posts, or other written work, provided that proper attribution
+     is given to the Author.
+
+
+3. NO LICENSE GRANTED
+---------------------
+For the avoidance of doubt, no license, express or implied, is granted
+under this document to use, copy, modify, or distribute the Software.
+This document is a notice of restriction, not a grant of rights.
+All rights not explicitly granted herein are reserved by the Author.
+
+
+4. ENFORCEMENT
+--------------
+Any violation of this license will be considered a breach of intellectual
+property rights and may result in legal action, including but not limited
+to claims for injunctive relief, monetary damages, and recovery of
+attorneys' fees.
+
+The Author reserves the right to issue DMCA takedown notices and to
+pursue any other remedies available under applicable law against
+unauthorised copies, forks, or derivatives of this Software.
+
+
+5. DISCLAIMER OF WARRANTY
+-------------------------
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+6. CONTACT
+----------
+For licensing enquiries, partnership requests, or to obtain written
+permission for any of the restricted actions listed above, contact:
+
+   Debarghya Sengupta
+   GitHub: https://github.com/Debarghyasg
+
+
+END OF LICENSE
