@@ -147,6 +147,54 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             await db.commit()
 
             log.info(
+                "Chunking complete: document_id=%s chunks=%d",
+                document_id, len(chunks),
+            )
+
+            # ── 5. Embed + index (Week 3) ──────────────────────────────────
+            from app.services.document.embedder import embed_and_index_chunks
+            from app.services.rag.bm25_store import build_and_store_bm25
+
+            if settings.OPENAI_API_KEY and settings.PINECONE_API_KEY:
+                try:
+                    vectors_upserted = await embed_and_index_chunks(
+                        chunks=chunks,
+                        document_id=document_id,
+                        workspace_id=doc.workspace_id,
+                        ticker=doc.ticker,
+                        fiscal_period=doc.fiscal_period,
+                        db=db,
+                    )
+                    log.info(
+                        "Embedding complete: document_id=%s vectors=%d",
+                        document_id, vectors_upserted,
+                    )
+
+                    # Rebuild BM25 index for this workspace to include new chunks
+                    await build_and_store_bm25(
+                        workspace_id=doc.workspace_id,
+                        db=db,
+                    )
+                    log.info(
+                        "BM25 index rebuilt for workspace=%s", doc.workspace_id
+                    )
+                except Exception as embed_exc:
+                    # Embedding failure should NOT fail the whole pipeline.
+                    # Document stays at CHUNKED — analyst can still browse chunks.
+                    # Re-indexing can be triggered manually later.
+                    log.error(
+                        "Embedding/indexing failed for document_id=%s: %s — "
+                        "document stays at CHUNKED status",
+                        document_id, embed_exc,
+                    )
+            else:
+                log.info(
+                    "OPENAI_API_KEY or PINECONE_API_KEY not set — "
+                    "skipping embedding for document_id=%s (stays CHUNKED)",
+                    document_id,
+                )
+
+            log.info(
                 "Pipeline complete: document_id=%s chunks=%d",
                 document_id, len(chunks),
             )
@@ -483,12 +531,42 @@ async def delete_document(
     """
     doc = await _get_document_or_404(document_id, current_user, db)
 
-    # Delete S3 objects (best-effort — don't fail the request if S3 errors)
+    # ── Count chunks before delete (needed for Pinecone ID range) ────────────
+    count_result = await db.execute(
+        select(func.count()).where(Chunk.document_id == document_id)
+    )
+    chunk_count = count_result.scalar_one()
+    workspace_id = doc.workspace_id
+
+    # ── Delete S3 objects (best-effort) ───────────────────────────────────────
     for s3_key in filter(None, [doc.s3_key_original, doc.s3_key_extracted]):
         try:
             await asyncio.to_thread(s3.delete_object, s3_key)
         except Exception as exc:
             log.warning("S3 delete failed for key %r: %s", s3_key, exc)
 
+    # ── Delete Pinecone vectors (best-effort) ─────────────────────────────────
+    if chunk_count > 0:
+        try:
+            from app.services.document.embedder import delete_document_vectors
+            await delete_document_vectors(
+                document_id=document_id,
+                workspace_id=workspace_id,
+                chunk_count=chunk_count,
+            )
+        except Exception as exc:
+            log.warning("Pinecone vector delete failed for %s: %s", document_id, exc)
+
+    # ── Delete DB row (cascades to chunks) ────────────────────────────────────
     await db.delete(doc)
+    await db.flush()   # flush before rebuilding BM25 so new query sees no chunks
+
+    # ── Rebuild BM25 index without this document's chunks ────────────────────
+    try:
+        from app.services.rag.bm25_store import build_and_store_bm25
+        await build_and_store_bm25(workspace_id=workspace_id, db=db)
+        log.info("BM25 index rebuilt after deletion: workspace=%s", workspace_id)
+    except Exception as exc:
+        log.warning("BM25 rebuild failed after document delete: %s", exc)
+
     # Commit happens in get_db() on clean exit

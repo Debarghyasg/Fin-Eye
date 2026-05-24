@@ -31,6 +31,23 @@ aiofiles==23.2.1                 # async file I/O
 tenacity==8.3.0                  # retry logic for AWS calls
 structlog==24.1.0                # structured JSON logging
 
+# ── OpenAI ──────────────────────────────────────────────────────
+openai==1.35.3                   # embeddings + GPT-4o chat
+
+# ── Pinecone ─────────────────────────────────────────────────────
+pinecone-client==3.2.2           # vector upsert / query
+
+# ── BM25 sparse retrieval ────────────────────────────────────────
+rank-bm25==0.2.2                 # BM25Okapi index
+
+# ── Redis (BM25 index cache + future rate-limit) ─────────────────
+redis[hiredis]==5.0.6            # async Redis client
+aioredis==2.0.1                  # used by tests
+
+# ── Re-ranking (cross-encoder) ───────────────────────────────────
+sentence-transformers==3.0.1     # cross-encoder/ms-marco-MiniLM-L-6-v2
+torch==2.3.1                     # CPU-only; ~750 MB — use --index-url for GPU
+
 # ── Testing ─────────────────────────────────────────────────────
 pytest==8.2.0
 pytest-asyncio==0.23.6

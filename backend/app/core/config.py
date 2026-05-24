@@ -79,10 +79,31 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
     OPENAI_CHAT_MODEL: str = "gpt-4o"
 
-    # ── Pinecone (Week 3+) ────────────────────────────────────────
+    # ── Pinecone ──────────────────────────────────────────────────
     PINECONE_API_KEY: str = ""
     PINECONE_ENVIRONMENT: str = "gcp-starter"
     PINECONE_INDEX_NAME: str = "finsight-docs"
+    PINECONE_DIMENSION: int = 3072        # must match text-embedding-3-large
+    PINECONE_METRIC: str = "cosine"
+    # Pinecone serverless cloud + region (us-east-1 free tier)
+    PINECONE_CLOUD: str = "aws"
+    PINECONE_REGION: str = "us-east-1"
+
+    # ── Redis ─────────────────────────────────────────────────────
+    REDIS_URL: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL — redis://host:port/db",
+    )
+    # BM25 index TTL in Redis (7 days — rebuilt on re-index)
+    REDIS_BM25_TTL: int = 604800
+
+    # ── Re-ranker ─────────────────────────────────────────────────
+    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_TOP_N: int = 5              # final chunks sent to LLM after rerank
+    RETRIEVER_TOP_K: int = 20            # candidates fetched before rerank
+
+    # ── RRF ───────────────────────────────────────────────────────
+    RRF_K: int = 60                      # RRF constant (standard = 60)
 
     # ── Document processing ───────────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = 50
