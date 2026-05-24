@@ -1,7 +1,8 @@
 "use client";
 import React, { useState } from "react";
+import Image from "next/image";
 import { motion } from "framer-motion";
-import { TrendingUp, Mail, Lock, Eye, EyeOff, ArrowRight, Github, Chrome } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Github, Chrome } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -57,10 +58,24 @@ export default function SignInPage() {
           transition={{ duration: 0.5 }}
           className="flex flex-col items-center mb-8"
         >
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center shadow-[0_0_30px_rgba(34,162,105,0.4)] mb-4 animate-float">
-            <TrendingUp className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-gradient">FinSight AI</h1>
+          <motion.div
+            className="mb-3 animate-float"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.6, type: "spring" }}
+          >
+            <Image
+              src="/logo-mark.svg"
+              alt="Fin-Sight"
+              width={64}
+              height={64}
+              className="drop-shadow-[0_0_30px_rgba(34,162,105,0.5)]"
+              priority
+            />
+          </motion.div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Fin<span className="text-fin-400">-</span>Sight
+          </h1>
           <p className="text-muted-foreground text-sm mt-1">Financial Document Intelligence</p>
         </motion.div>
 

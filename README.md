@@ -1,197 +1,299 @@
-# FinSight AI
+<div align="center">
 
-> Production-grade financial document intelligence platform — query 10-Ks, earnings calls, and SEC filings with cited answers, anomaly detection, and full audit trails.
+  <img src="frontend/public/logo.svg" alt="Fin-Sight" width="320" />
+
+  ### Financial Document Intelligence — 100% Free Stack
+
+  **Upload financial filings → ask questions → get cited answers**
+
+  <p>
+    <a href="#-quick-start"><strong>Quick start</strong></a> ·
+    <a href="#-architecture"><strong>Architecture</strong></a> ·
+    <a href="#-api-reference"><strong>API</strong></a> ·
+    <a href="#-tech-stack"><strong>Tech</strong></a>
+  </p>
+
+  <p>
+    <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15.3-000000?style=flat&logo=next.js" />
+    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.111-009688?style=flat&logo=fastapi" />
+    <img alt="Postgres" src="https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql" />
+    <img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-0.5-FF6B6B?style=flat" />
+    <img alt="Groq" src="https://img.shields.io/badge/Groq-Llama_3.1_70B-F97316?style=flat" />
+    <img alt="Cost" src="https://img.shields.io/badge/Cost-%240%2Fmonth-22c55e?style=flat" />
+  </p>
+
+</div>
 
 ---
 
-## Monorepo structure
+## What is Fin-Sight?
 
-```
-Fin-Eye/
-├── frontend/          Next.js 14 (App Router) — TypeScript, Tailwind, Framer Motion
-├── backend/           FastAPI — Python 3.11, SQLAlchemy async, Alembic
-├── docker-compose.yml PostgreSQL 16 + API + LocalStack (S3/SQS)
-└── README.md
-```
+Fin-Sight is a production-grade RAG platform built specifically for financial documents — 10-Ks, earnings calls, prospectuses, annual reports. Upload a filing, ask questions in natural language, and get answers with **inline citations**, **page numbers**, and **confidence scores**. Compare two filings side by side. Get anomaly alerts when key metrics deviate from historical norms.
+
+**Why this exists:** institutional analysts spend hours reading 300-page filings to find one number. Fin-Sight reads them once and answers questions in seconds — with the exact source paragraph cited so you can verify every claim.
 
 ---
 
-## Quick start — local dev
+## ✨ Key features
+
+- **Hybrid RAG** — ChromaDB dense vector search + BM25 sparse search merged via Reciprocal Rank Fusion
+- **Cross-encoder reranking** — `ms-marco-MiniLM-L-6-v2` reorders top-20 candidates for relevance
+- **LLM-grounded answers** — Llama 3.1 70B (via Groq) with strict citation prompting + JSON output
+- **Adaptive chunking** — 800-char prose with 150-char overlap, whole-table chunks, header detection
+- **PII pre-storage scan** — regex-based scanner blocks SSNs, credit cards, passport numbers
+- **Async pipeline** — uploads return immediately, processing happens in background tasks
+- **Immutable audit log** — every query written to Postgres, satisfies SEC Rule 17a-4 retention
+- **Workspace isolation** — each workspace has its own ChromaDB namespace + BM25 index
+- **Real document extraction** — PyMuPDF for prose, pdfplumber for financial tables (no OCR yet)
+
+---
+
+## 🆓 Why is everything free?
+
+| Layer | Service | Free tier |
+|---|---|---|
+| LLM | **Groq** (Llama 3.1 70B) | 14,400 requests/day, 6k tokens/min |
+| Embeddings | **HuggingFace** `all-MiniLM-L6-v2` | Runs locally on CPU — no API |
+| Vector store | **ChromaDB** | Self-hosted in Docker, persistent volume |
+| Sparse search | **rank-bm25** + Redis | Both in Docker |
+| Database | **PostgreSQL 16** | In Docker |
+| File storage | **Local filesystem** | Docker volume |
+| Queue | **FastAPI BackgroundTasks** | In-process |
+| Auth | **Clerk** (free tier) | 10,000 MAU |
+| Re-ranker | **sentence-transformers** | CPU, 85 MB model |
+
+**Total monthly cost: $0.** No credit card needed except Clerk (and Clerk doesn't ask for one on the free tier).
+
+---
+
+## 🚀 Quick start
 
 ### Prerequisites
-- Docker + Docker Compose v2
-- Node.js 20+ (for frontend)
-- Python 3.11+ (for backend outside Docker)
-- A [Clerk](https://clerk.com) account (free tier is fine)
 
-### 1 — Clone and configure
+- **Docker Desktop** + Docker Compose v2
+- **Node.js 20+** (for the frontend)
+- A free [Clerk](https://clerk.com) account
+- A free [Groq](https://console.groq.com) API key
+
+### 1 — Clone
 
 ```bash
 git clone https://github.com/Debarghyasg/Fin-Eye.git
 cd Fin-Eye
-
-# Copy env template and fill in Clerk keys
-cp backend/.env.example backend/.env
-# Edit backend/.env — minimum required:
-#   CLERK_SECRET_KEY=sk_test_...
-#   CLERK_PUBLISHABLE_KEY=pk_test_...
-#   CLERK_JWT_AUDIENCE=https://your-app.clerk.accounts.dev
 ```
 
-### 2 — Start infrastructure
+### 2 — Configure environment
 
 ```bash
-# Starts: PostgreSQL 16, FastAPI (with --reload), LocalStack (S3 + SQS)
+cp backend/.env.example backend/.env
+```
+
+Open `backend/.env` and fill in **just three things**:
+
+```env
+# From dashboard.clerk.com
+CLERK_SECRET_KEY=sk_test_...
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_JWT_AUDIENCE=https://your-app.clerk.accounts.dev
+
+# From console.groq.com (60-second signup)
+GROQ_API_KEY=gsk_...
+```
+
+Everything else has working defaults for local Docker dev.
+
+### 3 — Start the backend
+
+```bash
 docker-compose up
 ```
 
-On first boot the API container will:
-1. Run `alembic upgrade head` — creates all 5 tables
-2. Create the S3 bucket `finsight-documents` in LocalStack
-3. Create the SQS queue `finsight-documents` in LocalStack
+This boots:
+- **PostgreSQL 16** (port 5432) — runs Alembic migrations automatically on first start
+- **Redis** (port 6379) — caches BM25 indices
+- **ChromaDB** (port 8001) — vector store with persistent volume
+- **FastAPI** (port 8000) — auto-reloads on file changes
 
-### 3 — Verify the API is running
-
+Verify:
 ```bash
-curl http://localhost:8000/
-# {"service":"FinSight AI","version":"0.1.0","status":"ok"}
-
 curl http://localhost:8000/api/v1/analytics/health
-# {"status":"ok","database":"ok","version":"0.1.0","environment":"development"}
+# {"status":"ok","database":"ok",...}
 ```
 
 Interactive API docs: **http://localhost:8000/docs**
 
-### 4 — Run the frontend
+### 4 — Start the frontend
+
+In a new terminal:
 
 ```bash
 cd frontend
-npm install
+npm install --legacy-peer-deps
 npm run dev
-# → http://localhost:3000
+```
+
+Open **http://localhost:3000** → sign in → upload a 10-K → ask a question.
+
+---
+
+## 🏗 Architecture
+
+```
+                                 ┌──────────────────┐
+                                 │   Next.js 15     │
+                                 │   (Clerk auth)   │
+                                 └────────┬─────────┘
+                                          │ Bearer JWT
+                                 ┌────────▼─────────┐
+                                 │   FastAPI        │
+                                 │   /api/v1        │
+                                 └────┬─────────────┘
+                                      │
+        ┌─────────────────────────────┼──────────────────────────────┐
+        │                             │                              │
+        ▼                             ▼                              ▼
+┌──────────────┐             ┌──────────────┐               ┌──────────────┐
+│  PostgreSQL  │             │     RAG      │               │  Background  │
+│  (metadata,  │             │   pipeline   │               │  pipeline    │
+│  audit log)  │             │              │               │  (extract +  │
+└──────────────┘             │              │               │   chunk +    │
+                             │              │               │   embed)     │
+                             └──────┬───────┘               └──────┬───────┘
+                                    │                              │
+                  ┌─────────────────┼─────────────┐         ┌──────▼──────┐
+                  │                 │             │         │  PyMuPDF    │
+                  ▼                 ▼             ▼         │  pdfplumber │
+            ┌─────────┐       ┌──────────┐  ┌─────────┐    └──────┬──────┘
+            │ChromaDB │       │  Redis   │  │  Groq   │           │
+            │ (dense) │       │  BM25    │  │ Llama   │           │
+            └─────────┘       └──────────┘  │ 3.1 70B │      ┌────▼─────┐
+                                            └─────────┘      │  Local   │
+                                                             │  files / │
+                                                             │  S3      │
+                                                             └──────────┘
+```
+
+### Query flow
+
+```
+1. embed_query()        → all-MiniLM-L6-v2 (384-dim, local CPU)
+2. dense_search()       → ChromaDB top-20 (workspace_id filter)
+3. sparse_search()      → BM25 from Redis top-20
+4. rrf_merge()          → score(d) = Σ 1/(60 + rank_i)
+5. cross_encoder()      → reorder top-20 → top-5
+6. groq_chat()          → Llama 3.1 70B with JSON mode + strict citation prompt
+7. write_query_log()    → immutable audit row in Postgres
 ```
 
 ---
 
-## Backend — manual setup (without Docker)
+## 📡 API reference
 
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+### Auth
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/auth/me` | Current user profile |
+| `PATCH` | `/api/v1/auth/me` | Update display name / email |
+| `GET` | `/api/v1/auth/me/workspaces` | List workspaces |
+| `POST` | `/api/v1/auth/me/workspaces` | Create a workspace |
 
-# Run migrations against a local Postgres
-alembic upgrade head
+### Documents
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/documents/upload` | Upload PDF/DOCX/TXT (returns 202 immediately) |
+| `GET` | `/api/v1/documents?workspace_id=...` | Paginated list |
+| `GET` | `/api/v1/documents/{id}` | Document detail |
+| `GET` | `/api/v1/documents/{id}/status` | Lightweight polling endpoint |
+| `GET` | `/api/v1/documents/{id}/chunks` | Extracted chunks |
+| `PATCH` | `/api/v1/documents/{id}` | Update ticker / fiscal period |
+| `DELETE` | `/api/v1/documents/{id}` | Hard delete + cleanup |
 
-# Start the dev server
-uvicorn app.main:app --reload --port 8000
+### Queries
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/queries` | Run hybrid RAG query → cited answer |
+| `GET` | `/api/v1/queries/history` | Paginated audit log |
+
+### Analytics
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/analytics/health` | DB ping + version |
+| `GET` | `/api/v1/analytics/pipeline` | Per-stage health + latency |
+| `GET` | `/api/v1/analytics/stats?workspace_id=...` | Document + query counts |
+
+---
+
+## 🧱 Tech stack
+
+| Layer | Stack |
+|---|---|
+| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS, Framer Motion, Zustand, Recharts, react-dropzone |
+| Backend | FastAPI 0.111, Python 3.11, SQLAlchemy 2 (async), asyncpg |
+| Database | PostgreSQL 16 + Alembic migrations |
+| Auth | Clerk (RS256 JWT verification via JWKS) |
+| Vector store | ChromaDB 0.5 (HTTP client) |
+| Sparse retrieval | rank-bm25 + Redis 7 (pickle-cached per workspace) |
+| Embeddings | sentence-transformers `all-MiniLM-L6-v2` (384-dim, CPU) |
+| Re-ranker | sentence-transformers `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| LLM | Groq (Llama 3.1 70B + 8B fallback) — JSON mode |
+| Document extraction | PyMuPDF (prose) + pdfplumber (tables) |
+| File storage | Local filesystem (Docker volume) — pluggable to S3 |
+| Queue | FastAPI BackgroundTasks — pluggable to SQS |
+| Observability | structlog (JSON logs) |
+| Local dev | Docker Compose (4 services) |
+
+---
+
+## 📁 Repository layout
+
+```
+Fin-Eye/
+├── README.md
+├── docker-compose.yml
+├── frontend/
+│   ├── public/
+│   │   ├── logo.svg            # Full wordmark
+│   │   ├── logo-mark.svg       # Just the fin (used in sidebar/auth)
+│   │   └── favicon.svg
+│   ├── src/
+│   │   ├── app/                # App router pages
+│   │   │   ├── (auth)/         # sign-in, sign-up
+│   │   │   └── (app)/          # dashboard, workspace, compare, alerts, settings
+│   │   ├── components/         # ui/, layout/, dashboard/, workspace/
+│   │   ├── lib/                # utils, mock data
+│   │   └── store/              # Zustand
+│   └── package.json
+└── backend/
+    ├── app/
+    │   ├── main.py             # FastAPI app + lifespan
+    │   ├── core/               # config, security (Clerk), dependencies
+    │   ├── db/                 # models, schemas, session
+    │   ├── api/routes/         # auth, documents, queries, analytics
+    │   └── services/
+    │       ├── storage.py      # local-filesystem ↔ S3 abstraction
+    │       ├── document/       # extractor, chunker, embedder
+    │       ├── rag/            # pipeline, retriever, reranker, generator, bm25_store
+    │       ├── analytics/      # comparison, anomaly (Week 4 stubs)
+    │       └── aws/            # s3, sqs, comprehend (only used if USE_S3=true)
+    ├── alembic/                # versioned migrations
+    ├── tests/                  # pytest + in-memory SQLite
+    ├── Dockerfile
+    └── requirements.txt
 ```
 
 ---
 
-## Run tests
+## 🛣 Roadmap
 
-```bash
-cd backend
-pip install pytest pytest-asyncio httpx aiosqlite
-pytest tests/ -v
-```
-
----
-
-## API reference
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/auth/me` | Current user profile |
-| PATCH | `/api/v1/auth/me` | Update display name |
-| GET | `/api/v1/auth/me/workspaces` | List workspaces |
-| POST | `/api/v1/auth/me/workspaces` | Create workspace |
-| POST | `/api/v1/documents/upload` | Upload document (async pipeline) |
-| GET | `/api/v1/documents?workspace_id=` | List documents |
-| GET | `/api/v1/documents/{id}` | Document detail |
-| GET | `/api/v1/documents/{id}/status` | Poll processing status |
-| GET | `/api/v1/documents/{id}/chunks` | List extracted chunks |
-| PATCH | `/api/v1/documents/{id}` | Update metadata |
-| DELETE | `/api/v1/documents/{id}` | Delete document |
-| POST | `/api/v1/queries` | RAG query *(Week 3)* |
-| GET | `/api/v1/queries/history` | Query audit log |
-| GET | `/api/v1/analytics/health` | Health check |
-| GET | `/api/v1/analytics/pipeline` | Pipeline stage status |
-| GET | `/api/v1/analytics/stats` | Workspace statistics |
-| POST | `/api/v1/analytics/compare` | Doc comparison *(Week 4)* |
+- [x] **Week 1** — Auth, DB schema, FastAPI skeleton, health checks
+- [x] **Week 2** — Upload pipeline, S3-or-local storage, PII scan, extraction, chunking
+- [x] **Week 3** — Embeddings, ChromaDB, BM25, RRF, cross-encoder rerank, Groq generator
+- [ ] **Week 4** — Document comparison (metric deltas, risk diff, sentiment), anomaly detection
+- [ ] **Week 5** — Terraform → AWS (ECS Fargate, RDS, real S3+SQS), Datadog APM
+- [ ] **Week 6** — Embeddable widget, Slack/PagerDuty alerts, CSV/Excel ingestion
 
 ---
 
-## Document processing pipeline
+## 🪪 License
 
-```
-Upload → S3 → PII Scan (Comprehend) → SQS event
-                                           ↓
-                               Background worker / Lambda
-                                           ↓
-                              PyMuPDF prose extraction
-                              pdfplumber table extraction
-                                           ↓
-                              Chunker (800/150 prose + whole-table)
-                                           ↓
-                              DB chunks written  ← Week 2 ✓
-                                           ↓
-                              OpenAI embeddings → Pinecone  ← Week 3
-                                           ↓
-                              Anomaly detection + alerts     ← Week 4
-```
-
----
-
-## PostgreSQL — manual migration query
-
-If you need to run the migration manually against an external database:
-
-```bash
-# From backend/
-DATABASE_URL=postgresql+psycopg2://user:pass@host:5432/dbname alembic upgrade head
-```
-
-Or provide the connection string in `backend/.env` and run `alembic upgrade head`.
-
----
-
-## Environment variables
-
-See [`backend/.env.example`](backend/.env.example) for the full list with descriptions.
-
-**Minimum required to start:**
-
-| Variable | Where to get it |
-|----------|-----------------|
-| `DATABASE_URL` | Your Postgres connection string |
-| `CLERK_SECRET_KEY` | [Clerk dashboard](https://dashboard.clerk.com) → API Keys |
-| `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys |
-| `CLERK_JWT_AUDIENCE` | Clerk dashboard → API Keys → Frontend API URL |
-
-**Required for Week 3 (RAG queries):**
-
-| Variable | Where to get it |
-|----------|-----------------|
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com/api-keys) |
-| `PINECONE_API_KEY` | [app.pinecone.io](https://app.pinecone.io) |
-
----
-
-## Tech stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS, Framer Motion, Zustand, Recharts |
-| Backend | FastAPI, Python 3.11, SQLAlchemy 2 async, asyncpg |
-| Database | PostgreSQL 16 |
-| Migrations | Alembic |
-| Auth | Clerk (JWT RS256) |
-| Storage | AWS S3 (LocalStack in dev) |
-| Queue | AWS SQS (LocalStack in dev) |
-| PII detection | AWS Comprehend (regex fallback in dev) |
-| Extraction | PyMuPDF + pdfplumber |
-| Vector store | Pinecone *(Week 3)* |
-| LLM | GPT-4o *(Week 3)* |
-| Infra | Terraform + AWS ECS Fargate *(Week 5)* |
+MIT

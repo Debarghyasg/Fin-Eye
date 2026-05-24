@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="finGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"  stop-color="#7dd8ab"/>
+      <stop offset="50%" stop-color="#47be85"/>
+      <stop offset="100%" stop-color="#22a269"/>
+    </linearGradient>
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"  stop-color="#47be85"/>
+      <stop offset="100%" stop-color="#168254"/>
+    </linearGradient>
+  </defs>
+
+  <path
+    d="M 32 56 C 38 38, 52 22, 70 14 C 64 26, 60 38, 60 50 C 60 56, 58 60, 50 62 Z"
+    fill="url(#finGrad)"
+  />
+  <path
+    d="M 14 70 C 26 64, 40 76, 56 70 C 70 64, 84 76, 96 70 L 96 78 C 84 84, 70 72, 56 78 C 40 84, 26 72, 14 78 Z"
+    fill="url(#waveGrad)"
+  />
+</svg>

@@ -9,10 +9,22 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "FinSight AI — Financial Document Intelligence",
+  title: "Fin-Sight — Financial Document Intelligence",
   description:
-    "Production-grade AI platform for querying, comparing, and monitoring financial documents — 10-Ks, earnings calls, SEC filings.",
-  keywords: ["financial AI", "RAG", "document intelligence", "SEC filings", "earnings analysis"],
+    "AI-powered platform for querying, comparing, and monitoring financial documents — 10-Ks, earnings calls, SEC filings — with cited answers and full audit trails.",
+  keywords: [
+    "financial AI",
+    "RAG",
+    "document intelligence",
+    "SEC filings",
+    "earnings analysis",
+    "Fin-Sight",
+  ],
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

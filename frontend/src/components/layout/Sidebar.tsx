@@ -3,9 +3,10 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import Image from "next/image";
 import {
   LayoutDashboard, FileText, GitCompare, Bell, Settings,
-  ChevronLeft, ChevronRight, Zap, TrendingUp, Shield, LogOut,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -35,29 +36,35 @@ export function Sidebar() {
         className="relative flex flex-col h-screen border-r border-white/[0.07] bg-card/60 backdrop-blur-xl z-30 overflow-hidden"
       >
         {/* Logo */}
-        <div className="flex items-center h-16 px-4 border-b border-white/[0.07]">
+        <Link href="/dashboard" className="flex items-center h-16 px-4 border-b border-white/[0.07]">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="relative flex-shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center shadow-[0_0_15px_rgba(34,162,105,0.4)]">
-              <TrendingUp className="w-4 h-4 text-white" />
+            {/* Mark only — always visible */}
+            <div className="relative flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center">
+              <Image
+                src="/logo-mark.svg"
+                alt="Fin-Sight"
+                width={36}
+                height={36}
+                className="drop-shadow-[0_0_10px_rgba(34,162,105,0.45)]"
+                priority
+              />
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-fin-300 animate-pulse-glow" />
             </div>
             <AnimatePresence>
               {!sidebarCollapsed && (
-                <motion.div
-                  initial={{ opacity: 0, x: -10 }}
+                <motion.span
+                  initial={{ opacity: 0, x: -8 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
+                  exit={{ opacity: 0, x: -8 }}
                   transition={{ duration: 0.2 }}
-                  className="overflow-hidden"
+                  className="font-bold text-base whitespace-nowrap tracking-tight overflow-hidden"
                 >
-                  <span className="font-bold text-base text-gradient whitespace-nowrap">
-                    FinSight AI
-                  </span>
-                </motion.div>
+                  Fin<span className="text-fin-400">-</span>Sight
+                </motion.span>
               )}
             </AnimatePresence>
           </div>
-        </div>
+        </Link>
 
         {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-1">

@@ -1,7 +1,8 @@
 "use client";
 import React, { useState } from "react";
+import Image from "next/image";
 import { motion } from "framer-motion";
-import { TrendingUp, Mail, Lock, User, Building2, ArrowRight, Check } from "lucide-react";
+import { Mail, Lock, User, Building2, ArrowRight, Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -47,10 +48,17 @@ export default function SignUpPage() {
         <div className="absolute top-0 left-0 w-96 h-96 bg-fin-500/10 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
 
         <div className="relative z-10 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center shadow-[0_0_20px_rgba(34,162,105,0.4)]">
-            <TrendingUp className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-xl font-bold text-gradient">FinSight AI</span>
+          <Image
+            src="/logo-mark.svg"
+            alt="Fin-Sight"
+            width={44}
+            height={44}
+            className="drop-shadow-[0_0_15px_rgba(34,162,105,0.4)]"
+            priority
+          />
+          <span className="text-xl font-bold tracking-tight">
+            Fin<span className="text-fin-400">-</span>Sight
+          </span>
         </div>
 
         <div className="relative z-10">
