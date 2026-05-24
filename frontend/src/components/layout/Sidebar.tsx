@@ -57,9 +57,10 @@ export function Sidebar() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -8 }}
                   transition={{ duration: 0.2 }}
-                  className="font-bold text-base whitespace-nowrap tracking-tight overflow-hidden"
+                  className="font-bold text-base whitespace-nowrap tracking-tight overflow-hidden font-serif"
+                  style={{ fontFamily: "'Cinzel', 'Playfair Display', Georgia, serif" }}
                 >
-                  Fin<span className="text-fin-400">-</span>Sight
+                  Fin<span className="text-slate-400">-</span>Sight
                 </motion.span>
               )}
             </AnimatePresence>

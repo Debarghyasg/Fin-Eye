@@ -1,22 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
   <defs>
-    <linearGradient id="finGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%"  stop-color="#7dd8ab"/>
-      <stop offset="50%" stop-color="#47be85"/>
-      <stop offset="100%" stop-color="#22a269"/>
+    <linearGradient id="finBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"  stop-color="#b8cdd6"/>
+      <stop offset="50%" stop-color="#7a98a6"/>
+      <stop offset="100%" stop-color="#4d6878"/>
     </linearGradient>
-    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%"  stop-color="#47be85"/>
-      <stop offset="100%" stop-color="#168254"/>
+    <linearGradient id="waveBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"  stop-color="#7a98a6"/>
+      <stop offset="100%" stop-color="#5a7686"/>
     </linearGradient>
   </defs>
 
+  <!-- Shark fin -->
   <path
-    d="M 32 56 C 38 38, 52 22, 70 14 C 64 26, 60 38, 60 50 C 60 56, 58 60, 50 62 Z"
-    fill="url(#finGrad)"
+    d="M 38 52 C 44 30, 60 12, 76 4
+       C 70 22, 64 42, 64 56
+       C 64 62, 60 66, 52 68 Z"
+    fill="url(#finBlue)"
   />
+
+  <!-- Wave underneath -->
   <path
-    d="M 14 70 C 26 64, 40 76, 56 70 C 70 64, 84 76, 96 70 L 96 78 C 84 84, 70 72, 56 78 C 40 84, 26 72, 14 78 Z"
-    fill="url(#waveGrad)"
+    d="M 12 72
+       C 26 66, 42 80, 56 72
+       C 70 66, 82 78, 92 72
+       L 92 82
+       C 82 88, 70 76, 56 82
+       C 42 88, 26 76, 12 82 Z"
+    fill="url(#waveBlue)"
   />
 </svg>

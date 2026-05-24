@@ -1,36 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" fill="none">
-  <!-- Shark fin (cyan-blue gradient) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
+  <!-- Black background -->
+  <rect width="400" height="400" fill="#000000"/>
+
   <defs>
-    <linearGradient id="finGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%"  stop-color="#7dd8ab"/>
-      <stop offset="50%" stop-color="#47be85"/>
-      <stop offset="100%" stop-color="#22a269"/>
+    <linearGradient id="finBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"  stop-color="#b8cdd6"/>
+      <stop offset="50%" stop-color="#7a98a6"/>
+      <stop offset="100%" stop-color="#4d6878"/>
     </linearGradient>
-    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%"  stop-color="#47be85"/>
-      <stop offset="100%" stop-color="#168254"/>
+    <linearGradient id="waveBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"  stop-color="#7a98a6"/>
+      <stop offset="100%" stop-color="#5a7686"/>
     </linearGradient>
   </defs>
 
-  <!-- Fin shape (curved, leaning right) -->
+  <!-- Shark fin (curved, leaning right, centred) -->
   <path
-    d="M 32 56 C 38 38, 52 22, 70 14 C 64 26, 60 38, 60 50 C 60 56, 58 60, 50 62 Z"
-    fill="url(#finGrad)"
+    d="M 178 198 C 188 162, 210 130, 240 110
+       C 232 138, 226 168, 226 196
+       C 226 206, 222 212, 212 214 Z"
+    fill="url(#finBlue)"
+    stroke="#000000"
+    stroke-width="1.5"
   />
 
-  <!-- Wave underneath -->
+  <!-- Wave underneath the fin -->
   <path
-    d="M 14 70 C 26 64, 40 76, 56 70 C 70 64, 84 76, 96 70 L 96 78 C 84 84, 70 72, 56 78 C 40 84, 26 72, 14 78 Z"
-    fill="url(#waveGrad)"
+    d="M 130 222
+       C 158 214, 186 232, 214 222
+       C 240 214, 260 230, 280 222
+       L 280 234
+       C 260 242, 240 226, 214 234
+       C 186 242, 158 226, 130 234 Z"
+    fill="url(#waveBlue)"
+    stroke="#000000"
+    stroke-width="1"
   />
 
-  <!-- Wordmark: Fin-Sight -->
+  <!-- Fin-Sight wordmark — white serif, centred below mark -->
   <text
-    x="120" y="64"
-    font-family="'Inter', 'Segoe UI', -apple-system, sans-serif"
-    font-size="42"
-    font-weight="700"
-    fill="#f8fafc"
-    letter-spacing="-1"
-  >Fin<tspan fill="#47be85">-</tspan>Sight</text>
+    x="200"
+    y="320"
+    text-anchor="middle"
+    font-family="'Cinzel', 'Playfair Display', 'Times New Roman', Georgia, serif"
+    font-size="60"
+    font-weight="600"
+    fill="#ffffff"
+    letter-spacing="2"
+  >Fin-Sight</text>
 </svg>
