@@ -1,0 +1,214 @@
+export const mockDocuments = [
+  {
+    id: "doc-1",
+    name: "Apple_10K_2023.pdf",
+    type: "10-K",
+    company: "Apple Inc.",
+    ticker: "AAPL",
+    size: 4_820_000,
+    pages: 88,
+    uploadedAt: new Date(Date.now() - 2 * 3600000),
+    status: "indexed" as const,
+    tags: ["annual", "sec-filing"],
+    confidence: 0.97,
+  },
+  {
+    id: "doc-2",
+    name: "MSFT_EarningsQ4_2023.pdf",
+    type: "Earnings Call",
+    company: "Microsoft Corp.",
+    ticker: "MSFT",
+    size: 1_240_000,
+    pages: 24,
+    uploadedAt: new Date(Date.now() - 5 * 3600000),
+    status: "indexed" as const,
+    tags: ["earnings", "q4"],
+    confidence: 0.94,
+  },
+  {
+    id: "doc-3",
+    name: "JPM_AnnualReport_2023.pdf",
+    type: "Annual Report",
+    company: "JPMorgan Chase",
+    ticker: "JPM",
+    size: 9_100_000,
+    pages: 312,
+    uploadedAt: new Date(Date.now() - 1 * 86400000),
+    status: "indexed" as const,
+    tags: ["annual", "banking"],
+    confidence: 0.92,
+  },
+  {
+    id: "doc-4",
+    name: "Tesla_10K_2023.pdf",
+    type: "10-K",
+    company: "Tesla Inc.",
+    ticker: "TSLA",
+    size: 3_560_000,
+    pages: 96,
+    uploadedAt: new Date(Date.now() - 2 * 86400000),
+    status: "processing" as const,
+    tags: ["annual", "sec-filing"],
+    confidence: 0,
+  },
+  {
+    id: "doc-5",
+    name: "Google_Prospectus_2024.pdf",
+    type: "Prospectus",
+    company: "Alphabet Inc.",
+    ticker: "GOOGL",
+    size: 6_230_000,
+    pages: 180,
+    uploadedAt: new Date(Date.now() - 3 * 86400000),
+    status: "indexed" as const,
+    tags: ["prospectus"],
+    confidence: 0.96,
+  },
+];
+
+export const mockQueryHistory = [
+  {
+    id: "q-1",
+    query: "What was Apple's total revenue in FY2023 and how did it compare to FY2022?",
+    answer:
+      "Apple's total net sales for FY2023 were **$383.3 billion**, representing a decrease of approximately 2.8% from FY2022's $394.3 billion. The decline was primarily driven by a 2% drop in iPhone revenue and a 27% decline in Mac revenue, partially offset by 9% growth in Services revenue which reached $85.2 billion.",
+    sources: [
+      { docId: "doc-1", page: 23, excerpt: "Total net sales: $383,285 million" },
+      { docId: "doc-1", page: 31, excerpt: "Services net sales: $85,200 million" },
+    ],
+    confidence: 0.96,
+    timestamp: new Date(Date.now() - 1800000),
+  },
+  {
+    id: "q-2",
+    query: "What are the key risk factors mentioned across all uploaded filings?",
+    answer:
+      "Across the uploaded filings, **five common risk themes** emerge: (1) Macroeconomic uncertainty and interest rate exposure, cited by JPMorgan and Apple; (2) Geopolitical tensions and supply chain disruption, prominent in Apple and Tesla's 10-Ks; (3) AI and cybersecurity threats, highlighted by Microsoft and Alphabet; (4) Regulatory and compliance risk, especially in JPMorgan's banking disclosures; (5) Competition and market share erosion, mentioned across all filings.",
+    sources: [
+      { docId: "doc-1", page: 12, excerpt: "Adverse macroeconomic conditions..." },
+      { docId: "doc-3", page: 44, excerpt: "Interest rate risk exposure..." },
+      { docId: "doc-2", page: 8, excerpt: "Increasing competition in cloud..." },
+    ],
+    confidence: 0.89,
+    timestamp: new Date(Date.now() - 7200000),
+  },
+];
+
+export const mockAlerts = [
+  {
+    id: "alert-1",
+    company: "Apple Inc.",
+    ticker: "AAPL",
+    type: "anomaly" as const,
+    severity: "high" as const,
+    title: "R&D Spend Deviation Detected",
+    description: "R&D expense increased 14.2% YoY in Q4 2023, significantly above the 3-year average of 6.1% growth. This may signal accelerated investment in AI/ML capabilities.",
+    timestamp: new Date(Date.now() - 900000),
+    read: false,
+    docId: "doc-1",
+  },
+  {
+    id: "alert-2",
+    company: "Microsoft Corp.",
+    ticker: "MSFT",
+    type: "sentiment" as const,
+    severity: "medium" as const,
+    title: "Management Tone Shift in Q4 Call",
+    description: "Sentiment analysis of Q4 earnings call transcript shows a 23% increase in cautious language around Azure growth guidance compared to Q3 commentary.",
+    timestamp: new Date(Date.now() - 3600000),
+    read: false,
+    docId: "doc-2",
+  },
+  {
+    id: "alert-3",
+    company: "JPMorgan Chase",
+    ticker: "JPM",
+    type: "regulatory" as const,
+    severity: "low" as const,
+    title: "New Regulatory Language in Risk Section",
+    description: "3 new regulatory references detected in the 2023 Annual Report that were absent in 2022, relating to Basel III capital requirements and FDIC insurance updates.",
+    timestamp: new Date(Date.now() - 86400000),
+    read: true,
+    docId: "doc-3",
+  },
+  {
+    id: "alert-4",
+    company: "Tesla Inc.",
+    ticker: "TSLA",
+    type: "filing" as const,
+    severity: "info" as const,
+    title: "New Document Processed",
+    description: "Tesla 10-K FY2023 has finished indexing. 96 pages, 4 financial tables, and 12 risk factors extracted.",
+    timestamp: new Date(Date.now() - 172800000),
+    read: true,
+    docId: "doc-4",
+  },
+];
+
+export const mockSubscriptions = [
+  { ticker: "AAPL", company: "Apple Inc.", active: true, anomaly: true, sentiment: true, filing: true, regulatory: false },
+  { ticker: "MSFT", company: "Microsoft Corp.", active: true, anomaly: true, sentiment: false, filing: true, regulatory: false },
+  { ticker: "JPM", company: "JPMorgan Chase", active: true, anomaly: false, sentiment: false, filing: true, regulatory: true },
+  { ticker: "TSLA", company: "Tesla Inc.", active: false, anomaly: true, sentiment: true, filing: true, regulatory: false },
+];
+
+export const mockRevenueData = [
+  { quarter: "Q1 '22", AAPL: 97.3, MSFT: 49.4, GOOGL: 68.0, JPM: 30.7 },
+  { quarter: "Q2 '22", AAPL: 83.0, MSFT: 51.9, GOOGL: 69.7, JPM: 31.6 },
+  { quarter: "Q3 '22", AAPL: 90.1, MSFT: 50.1, GOOGL: 69.1, JPM: 32.7 },
+  { quarter: "Q4 '22", AAPL: 117.2, MSFT: 52.7, GOOGL: 76.0, JPM: 35.6 },
+  { quarter: "Q1 '23", AAPL: 94.8, MSFT: 52.9, GOOGL: 69.8, JPM: 38.3 },
+  { quarter: "Q2 '23", AAPL: 81.8, MSFT: 56.2, GOOGL: 74.6, JPM: 41.3 },
+  { quarter: "Q3 '23", AAPL: 89.5, MSFT: 56.5, GOOGL: 76.7, JPM: 39.9 },
+  { quarter: "Q4 '23", AAPL: 119.6, MSFT: 62.0, GOOGL: 86.3, JPM: 42.0 },
+];
+
+export const mockQueryVolumeData = [
+  { day: "Mon", queries: 142, successful: 135, failed: 7 },
+  { day: "Tue", queries: 231, successful: 218, failed: 13 },
+  { day: "Wed", queries: 189, successful: 180, failed: 9 },
+  { day: "Thu", queries: 307, successful: 295, failed: 12 },
+  { day: "Fri", queries: 264, successful: 250, failed: 14 },
+  { day: "Sat", queries: 98, successful: 96, failed: 2 },
+  { day: "Sun", queries: 76, successful: 74, failed: 2 },
+];
+
+export const mockDocTypeData = [
+  { name: "10-K Annual", value: 38, color: "#22a269" },
+  { name: "Earnings Call", value: 24, color: "#47be85" },
+  { name: "Prospectus", value: 18, color: "#7dd8ab" },
+  { name: "Annual Report", value: 12, color: "#b0eacb" },
+  { name: "Other", value: 8, color: "#1a6645" },
+];
+
+export const mockComparisonData = {
+  docA: {
+    id: "doc-1",
+    name: "Apple 10-K FY2022",
+    company: "Apple Inc.",
+    period: "FY2022",
+  },
+  docB: {
+    id: "doc-1b",
+    name: "Apple 10-K FY2023",
+    company: "Apple Inc.",
+    period: "FY2023",
+  },
+  metrics: [
+    { label: "Total Revenue", valueA: "$394.3B", valueB: "$383.3B", delta: -2.8, direction: "down" as const },
+    { label: "Net Income", valueA: "$99.8B", valueB: "$97.0B", delta: -2.8, direction: "down" as const },
+    { label: "Gross Margin", valueA: "43.3%", valueB: "44.1%", delta: +0.8, direction: "up" as const },
+    { label: "Services Revenue", valueA: "$78.1B", valueB: "$85.2B", delta: +9.1, direction: "up" as const },
+    { label: "R&D Expense", valueA: "$26.3B", valueB: "$29.9B", delta: +13.7, direction: "up" as const },
+    { label: "Operating Cash Flow", valueA: "$122.2B", valueB: "$114.0B", delta: -6.7, direction: "down" as const },
+    { label: "EPS (diluted)", valueA: "$6.15", valueB: "$6.13", delta: -0.3, direction: "down" as const },
+    { label: "Employee Count", valueA: "164,000", valueB: "161,000", delta: -1.8, direction: "down" as const },
+  ],
+  riskChanges: [
+    { type: "new" as const, text: "Generative AI and large language model competition risk added as a new risk factor." },
+    { type: "expanded" as const, text: "Supply chain concentration risk section expanded by 34% with new language around TSMC dependency." },
+    { type: "removed" as const, text: "COVID-19 operational disruption risk removed from primary risk factors." },
+    { type: "modified" as const, text: "Regulatory risk updated to include EU Digital Markets Act compliance requirements." },
+  ],
+  sentimentShift: { score2022: 0.71, score2023: 0.64, change: -0.07 },
+};
