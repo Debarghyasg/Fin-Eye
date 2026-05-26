@@ -151,47 +151,33 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
                 document_id, len(chunks),
             )
 
-            # ── 5. Embed + index (Week 3) ──────────────────────────────────
+            # ── 5. Embed + index — Qdrant native hybrid (PR 2) ─────────────
+            # Replaces the ChromaDB-only path. fastembed BM25 sparse vectors
+            # live alongside the dense MiniLM vectors in the same collection,
+            # so the separate Redis-cached BM25 rebuild is gone.
             from app.services.document.embedder import embed_and_index_chunks
-            from app.services.rag.bm25_store import build_and_store_bm25
 
-            if settings.OPENAI_API_KEY and settings.PINECONE_API_KEY:
-                try:
-                    vectors_upserted = await embed_and_index_chunks(
-                        chunks=chunks,
-                        document_id=document_id,
-                        workspace_id=doc.workspace_id,
-                        ticker=doc.ticker,
-                        fiscal_period=doc.fiscal_period,
-                        db=db,
-                    )
-                    log.info(
-                        "Embedding complete: document_id=%s vectors=%d",
-                        document_id, vectors_upserted,
-                    )
-
-                    # Rebuild BM25 index for this workspace to include new chunks
-                    await build_and_store_bm25(
-                        workspace_id=doc.workspace_id,
-                        db=db,
-                    )
-                    log.info(
-                        "BM25 index rebuilt for workspace=%s", doc.workspace_id
-                    )
-                except Exception as embed_exc:
-                    # Embedding failure should NOT fail the whole pipeline.
-                    # Document stays at CHUNKED — analyst can still browse chunks.
-                    # Re-indexing can be triggered manually later.
-                    log.error(
-                        "Embedding/indexing failed for document_id=%s: %s — "
-                        "document stays at CHUNKED status",
-                        document_id, embed_exc,
-                    )
-            else:
+            try:
+                vectors_upserted = await embed_and_index_chunks(
+                    chunks=chunks,
+                    document_id=document_id,
+                    workspace_id=doc.workspace_id,
+                    ticker=doc.ticker,
+                    fiscal_period=doc.fiscal_period,
+                    db=db,
+                )
                 log.info(
-                    "OPENAI_API_KEY or PINECONE_API_KEY not set — "
-                    "skipping embedding for document_id=%s (stays CHUNKED)",
-                    document_id,
+                    "Embedding complete: document_id=%s vectors=%d",
+                    document_id, vectors_upserted,
+                )
+            except Exception as embed_exc:
+                # Embedding failure should NOT fail the whole pipeline.
+                # Document stays at CHUNKED — analyst can still browse chunks.
+                # Re-indexing can be triggered manually later.
+                log.error(
+                    "Embedding/indexing failed for document_id=%s: %s — "
+                    "document stays at CHUNKED status",
+                    document_id, embed_exc,
                 )
 
             log.info(
@@ -332,10 +318,22 @@ async def upload_document(
         except Exception as exc:
             log.warning("SQS publish failed: %s", exc)
 
-    # ── Kick off background pipeline (local dev) ──────────────────────────────
-    background_tasks.add_task(
-        _process_document_pipeline, document_id, original_s3_key, mime_type
-    )
+    # ── Kick off document processing — durable Celery task on RabbitMQ ──────
+    # PR 2: replaces FastAPI BackgroundTasks with a Celery .delay() so a worker
+    # crash mid-extraction re-queues the document rather than losing it.
+    # When CELERY_TASK_ALWAYS_EAGER=true (tests) the task runs inline.
+    try:
+        from app.services.tasks import process_document
+        process_document.delay(document_id, original_s3_key, mime_type)
+    except Exception as exc:
+        # Broker outage must not break the upload — fall back to in-process
+        # BackgroundTasks so a single-node dev environment still works.
+        log.warning(
+            "Celery dispatch failed (%s) — falling back to BackgroundTasks", exc,
+        )
+        background_tasks.add_task(
+            _process_document_pipeline, document_id, original_s3_key, mime_type
+        )
 
     return DocumentUploadResponse(
         document_id=document_id,
@@ -561,14 +559,9 @@ async def delete_document(
 
     # ── Delete DB row (cascades to chunks) ────────────────────────────────────
     await db.delete(doc)
-    await db.flush()   # flush before rebuilding BM25 so new query sees no chunks
+    await db.flush()
 
-    # ── Rebuild BM25 index without this document's chunks ────────────────────
-    try:
-        from app.services.rag.bm25_store import build_and_store_bm25
-        await build_and_store_bm25(workspace_id=workspace_id, db=db)
-        log.info("BM25 index rebuilt after deletion: workspace=%s", workspace_id)
-    except Exception as exc:
-        log.warning("BM25 rebuild failed after document delete: %s", exc)
+    # PR 2: Qdrant deletes points atomically across both dense and sparse
+    # indexes — no per-workspace BM25 rebuild needed anymore.
 
     # Commit happens in get_db() on clean exit

@@ -115,7 +115,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             log.warning("dynamodb_audit_check_failed", error=str(exc))
 
-    # Start EDGAR poller (if enabled)
+    # Start EDGAR poller
+    # PR 2: when running with Celery (the recommended path) Celery Beat owns
+    # this schedule. We keep the in-process asyncio fallback for solo dev so
+    # you can still see filing alerts without booting RabbitMQ + Beat. Set
+    # USE_EDGAR_POLLER=true to enable; the inline runner skips itself if the
+    # beat schedule has already been registered with Celery (best-effort —
+    # operators are expected to choose one path or the other).
     if settings.USE_EDGAR_POLLER:
         try:
             from app.services.edgar import start_poller

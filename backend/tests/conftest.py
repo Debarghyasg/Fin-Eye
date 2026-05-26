@@ -7,11 +7,23 @@ Test strategy
 - Use httpx.AsyncClient with ASGITransport to test routes end-to-end.
 - Mock AWS calls (S3, SQS, Comprehend) with pytest-mock / moto.
 - Override get_current_user to inject a test user without a real Clerk JWT.
+- Force Celery into eager mode so process_document.delay() runs inline
+  without needing a real RabbitMQ broker.
 
 Install test extras:
     pip install pytest pytest-asyncio httpx aiosqlite moto[s3,sqs]
 """
 from __future__ import annotations
+
+import os
+
+# Force Celery eager BEFORE the app imports settings (Pydantic caches them).
+# Tasks dispatched via .delay() will execute inline in the test process.
+os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
+# Tests do not need a real RabbitMQ; eager mode bypasses the broker, but
+# Celery still parses the URL so keep it pointing at a harmless local default.
+os.environ.setdefault("CELERY_BROKER_URL", "memory://")
+os.environ.setdefault("CELERY_RESULT_BACKEND", "cache+memory://")
 
 import pytest
 import pytest_asyncio
