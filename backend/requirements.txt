@@ -32,6 +32,9 @@ tenacity==8.3.0                  # retry logic
 structlog==24.1.0                # structured JSON logging
 
 # ── FREE: Local embeddings (HuggingFace sentence-transformers) ───
+# numpy must stay on 1.x — torch 2.3.x, pdfplumber 0.11, and the pinned
+# scientific stack below were all compiled against numpy 1.x ABI.
+numpy<2.0
 sentence-transformers==3.0.1     # all-MiniLM-L6-v2  (384-dim, CPU, ~90 MB)
 torch==2.3.1                     # CPU inference only
 
@@ -80,4 +83,4 @@ prometheus-fastapi-instrumentator==7.0.0
 # ── Testing ─────────────────────────────────────────────────────
 pytest==8.2.0
 pytest-asyncio==0.23.6
-httpx==0.27.0                    # async test client
+# (httpx pinned above for the JWKS client; same version covers tests.)

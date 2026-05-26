@@ -216,14 +216,16 @@ services:
         condition: service_started
       seaweedfs:
         condition: service_started
-    # Run Alembic migrations on every start, then launch the API.
-    # Idempotent: if schema is already at HEAD, alembic is a no-op (~200 ms).
+    # The FastAPI lifespan in app/main.py already runs `alembic upgrade head`
+    # on startup (see lifespan() — it logs `migration_failed` if anything goes
+    # wrong but keeps serving so logs remain readable). Wrapping uvicorn in
+    # `sh -c "alembic upgrade head && uvicorn ..."` would short-circuit on
+    # any migration error and crash-loop the container, hiding the cause.
     command: >
-      sh -c "alembic upgrade head &&
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
-      --reload"
+      --reload
 
   # ── Celery worker (consumes RabbitMQ) ───────────────────────
   worker:
