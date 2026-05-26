@@ -258,3 +258,126 @@ async def test_run_anomaly_detection_uses_pre_extracted_metrics(db_session, new_
     # 400B is ~2.5σ above the mean of [265B, 260B, 275B, 366B] → should flag
     rev_alerts = [a for a in alerts if a.metric_name == "revenue"]
     assert len(rev_alerts) == 1
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Week 11 — extended Z-score threshold tests
+#
+# The detector classifies severity by |z|:
+#     |z| > 3.0   → "high"
+#     |z| > 2.5   → "medium"
+#     |z| > 2.0   → "low"
+#     |z| ≤ 2.0   → not an anomaly
+#
+# We construct histories with known mean and stdev, then feed values that land
+# precisely in each bucket. Boundaries are exclusive: |z| = 2.0 must NOT alert.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _history_with_known_stats():
+    """
+    Hand-picked history: mean=100, pstdev=10.
+
+    statistics.pstdev([90, 110, 90, 110]) = sqrt(((10²+10²+10²+10²)/4)) = 10.0
+    statistics.mean([90, 110, 90, 110])   = 100.0
+    """
+    return [90.0, 110.0, 90.0, 110.0]
+
+
+def test_z_threshold_low_severity_just_above_2sigma():
+    """|z| = 2.1 → 'low' severity anomaly."""
+    from app.services.analytics.anomaly import compute_z_score
+
+    history = _history_with_known_stats()
+    # Need (current - 100) / 10 = 2.1  →  current = 121
+    result = compute_z_score(121.0, history)
+    assert result is not None
+    assert result["is_anomaly"] is True
+    assert result["severity"] == "low"
+    assert result["z_score"] == pytest.approx(2.1, abs=0.001)
+
+
+def test_z_threshold_medium_severity_above_2_5sigma():
+    """|z| = 2.6 → 'medium'."""
+    from app.services.analytics.anomaly import compute_z_score
+
+    result = compute_z_score(126.0, _history_with_known_stats())
+    assert result is not None
+    assert result["is_anomaly"] is True
+    assert result["severity"] == "medium"
+    assert result["z_score"] == pytest.approx(2.6, abs=0.001)
+
+
+def test_z_threshold_high_severity_above_3sigma():
+    """|z| = 3.5 → 'high'."""
+    from app.services.analytics.anomaly import compute_z_score
+
+    result = compute_z_score(135.0, _history_with_known_stats())
+    assert result is not None
+    assert result["is_anomaly"] is True
+    assert result["severity"] == "high"
+    assert result["z_score"] == pytest.approx(3.5, abs=0.001)
+
+
+def test_z_threshold_negative_z_still_triggers_high():
+    """A value far BELOW the historical mean should also flag as 'high'."""
+    from app.services.analytics.anomaly import compute_z_score
+
+    # current = 60 → z = (60-100)/10 = -4.0
+    result = compute_z_score(60.0, _history_with_known_stats())
+    assert result["is_anomaly"] is True
+    assert result["severity"] == "high"
+    assert result["z_score"] == pytest.approx(-4.0)
+
+
+def test_z_threshold_exactly_2sigma_is_NOT_an_anomaly():
+    """|z| = 2.0 must NOT alert — the threshold is strict greater-than."""
+    from app.services.analytics.anomaly import compute_z_score
+
+    # current = 120 → z = (120-100)/10 = 2.0
+    result = compute_z_score(120.0, _history_with_known_stats())
+    assert result is not None
+    assert result["z_score"] == pytest.approx(2.0)
+    assert result["is_anomaly"] is False
+    assert result["severity"] is None
+
+
+def test_z_threshold_exactly_at_mean_returns_zero_z():
+    """A value exactly at the mean is the most boring possible reading."""
+    from app.services.analytics.anomaly import compute_z_score
+
+    result = compute_z_score(100.0, _history_with_known_stats())
+    assert result is not None
+    assert result["z_score"] == 0.0
+    assert result["is_anomaly"] is False
+
+
+def test_severity_classifier_buckets():
+    """The internal _severity_for_z helper must respect the documented bands."""
+    from app.services.analytics.anomaly import _severity_for_z
+
+    # Above 3.0 → high (positive and negative)
+    assert _severity_for_z(3.01) == "high"
+    assert _severity_for_z(-3.5) == "high"
+    # 2.5 < |z| ≤ 3.0 → medium
+    assert _severity_for_z(2.51) == "medium"
+    assert _severity_for_z(-2.9) == "medium"
+    # 2.0 < |z| ≤ 2.5 → low
+    assert _severity_for_z(2.1) == "low"
+    assert _severity_for_z(-2.4) == "low"
+    # At/under 2.0 the function still returns 'low' (caller decides whether to alert)
+    # but we sanity-check the >3 / >2.5 boundaries are correctly ordered
+    assert _severity_for_z(2.50) == "low"
+    assert _severity_for_z(3.00) == "medium"
+
+
+def test_min_history_samples_enforced():
+    """Below MIN_HISTORY_SAMPLES (3) the detector refuses to score even an outlier."""
+    from app.services.analytics.anomaly import compute_z_score, MIN_HISTORY_SAMPLES
+
+    assert MIN_HISTORY_SAMPLES == 3
+    # 2 samples — too small
+    assert compute_z_score(1000.0, [50.0, 60.0]) is None
+    # 0 samples — also None
+    assert compute_z_score(1000.0, []) is None

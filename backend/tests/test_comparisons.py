@@ -344,3 +344,251 @@ async def test_comparison_list_returns_user_history(client, db_session, apple_wo
         assert len(items) >= 1
         assert items[0]["document_a_id"] == docs["doc_a"].id
         assert items[0]["document_b_id"] == docs["doc_b"].id
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Week 11 — pure-function unit tests for the comparison engine (no DB, no LLM)
+# Each test feeds a known-input metric pair and asserts on the deterministic diff.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── calculate_change ─────────────────────────────────────────────────────────
+def test_calculate_change_simple_increase():
+    """100 → 110 is a +10% increase."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(100.0, 110.0)
+    assert diff is not None
+    assert diff["absolute_change"] == 10.0
+    assert diff["percentage_change"] == pytest.approx(10.0)
+    assert diff["direction"] == "increase"
+    assert diff["significance"] == "minor"
+
+
+def test_calculate_change_simple_decrease():
+    """200 → 150 is a -25% decrease — moderate."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(200.0, 150.0)
+    assert diff["absolute_change"] == -50.0
+    assert diff["percentage_change"] == pytest.approx(-25.0)
+    assert diff["direction"] == "decrease"
+    assert diff["significance"] == "moderate"
+
+
+def test_calculate_change_flat():
+    """Equal values produce direction='flat' and 0% change."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(50.0, 50.0)
+    assert diff["absolute_change"] == 0.0
+    assert diff["percentage_change"] == pytest.approx(0.0)
+    assert diff["direction"] == "flat"
+    assert diff["significance"] == "negligible"
+
+
+def test_calculate_change_negligible_under_5pct():
+    """A 2.8% move (Apple's actual FY22→FY23 revenue change) is negligible."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(394328.0, 383285.0)
+    assert diff["direction"] == "decrease"
+    assert diff["percentage_change"] == pytest.approx(-2.8, abs=0.1)
+    assert diff["significance"] == "negligible"
+
+
+def test_calculate_change_major_over_50pct():
+    """A 100% jump should be classified as a major change."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(100.0, 250.0)
+    assert diff["percentage_change"] == pytest.approx(150.0)
+    assert diff["significance"] == "major"
+
+
+def test_calculate_change_missing_values_returns_none():
+    """Either side missing → no diff possible."""
+    from app.services.financial.comparison import calculate_change
+    assert calculate_change(None, 100.0) is None
+    assert calculate_change(100.0, None) is None
+    assert calculate_change(None, None) is None
+
+
+def test_calculate_change_zero_old_value():
+    """Division by zero must NOT raise — pct is None, but absolute change still set."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(0.0, 50.0)
+    assert diff is not None
+    assert diff["absolute_change"] == 50.0
+    assert diff["percentage_change"] is None
+    assert diff["direction"] == "increase"
+    assert diff["significance"] == "unknown"
+
+
+def test_calculate_change_negative_baseline_uses_abs_for_pct():
+    """Loss-to-loss comparisons (-100 → -50) must compute pct using abs(old)."""
+    from app.services.financial.comparison import calculate_change
+    diff = calculate_change(-100.0, -50.0)
+    # abs change = +50, pct = 50/100 = +50%
+    assert diff["absolute_change"] == 50.0
+    assert diff["percentage_change"] == pytest.approx(50.0)
+    assert diff["direction"] == "increase"
+
+
+# ── diff_metrics ──────────────────────────────────────────────────────────────
+def test_diff_metrics_known_apple_fy22_fy23():
+    """End-to-end diff with the canonical Apple FY22→FY23 fixture used in this file."""
+    from app.services.financial.comparison import diff_metrics
+
+    diff = diff_metrics(APPLE_FY2022_METRICS, APPLE_FY2023_METRICS)
+
+    metric_diffs = diff["metric_comparisons"]
+
+    # Revenue: 394328 → 383285 = -2.8%
+    rev = metric_diffs["revenue"]
+    assert rev["direction"] == "decrease"
+    assert rev["percentage_change"] == pytest.approx(-2.8, abs=0.1)
+
+    # Net income: 99803 → 96995 = -2.81%
+    ni = metric_diffs["net_income"]
+    assert ni["direction"] == "decrease"
+
+    # Gross margin: 43.3 → 44.1 = +1.85%
+    gm = metric_diffs["gross_margin"]
+    assert gm["direction"] == "increase"
+    assert gm["new_value"] == pytest.approx(44.1)
+
+    # R&D: 26251 → 29915 = +13.96%
+    rd = metric_diffs["rd_expenses"]
+    assert rd["direction"] == "increase"
+    assert rd["percentage_change"] > 10
+    assert rd["significance"] in ("minor", "moderate")
+
+
+def test_diff_metrics_significant_changes_threshold():
+    """The summary.significant_changes list only includes >10% moves."""
+    from app.services.financial.comparison import diff_metrics
+
+    a = {"revenue": {"value": 100.0}, "net_income": {"value": 50.0}}
+    b = {"revenue": {"value": 105.0}, "net_income": {"value": 75.0}}   # +5% rev, +50% NI
+
+    out = diff_metrics(a, b)
+    sig = out["summary"]["significant_changes"]
+    sig_metrics = [s["metric"] for s in sig]
+
+    assert "net_income" in sig_metrics      # 50% > 10%
+    assert "revenue" not in sig_metrics     # 5% <= 10%
+
+
+def test_diff_metrics_risk_factor_diff_added_and_removed():
+    """Risk factors present only in B → 'added'; only in A → 'removed'."""
+    from app.services.financial.comparison import diff_metrics
+
+    a = {
+        "key_risk_factors": [
+            {"category": "supply", "description": "TSMC concentration", "severity": "high"},
+            {"category": "covid",  "description": "COVID-19 disruption", "severity": "medium"},
+        ],
+    }
+    b = {
+        "key_risk_factors": [
+            {"category": "supply", "description": "TSMC concentration", "severity": "high"},
+            {"category": "ai",     "description": "Generative AI competition", "severity": "high"},
+        ],
+    }
+
+    out = diff_metrics(a, b)
+    risk = out["risk_factor_changes"]
+
+    added_descs = [r["description"] for r in risk["added"]]
+    removed_descs = [r["description"] for r in risk["removed"]]
+
+    assert "Generative AI competition" in added_descs
+    assert "COVID-19 disruption" in removed_descs
+    assert risk["count_a"] == 2
+    assert risk["count_b"] == 2
+
+
+def test_diff_metrics_guidance_tone_shift_detected():
+    """A confidence_tone change between periods should be flagged as 'shifted'."""
+    from app.services.financial.comparison import diff_metrics
+
+    a = {"management_guidance": {"confidence_tone": "positive"}}
+    b = {"management_guidance": {"confidence_tone": "cautious"}}
+
+    out = diff_metrics(a, b)
+    g = out["guidance_change"]
+    assert g["tone_a"] == "positive"
+    assert g["tone_b"] == "cautious"
+    assert g["shifted"] is True
+
+
+def test_diff_metrics_guidance_tone_unchanged():
+    """Same tone → shifted=False."""
+    from app.services.financial.comparison import diff_metrics
+
+    a = {"management_guidance": {"confidence_tone": "neutral"}}
+    b = {"management_guidance": {"confidence_tone": "neutral"}}
+
+    g = diff_metrics(a, b)["guidance_change"]
+    assert g["shifted"] is False
+
+
+def test_diff_metrics_handles_missing_metrics_gracefully():
+    """If a metric is absent on one side, the diff for that name is None."""
+    from app.services.financial.comparison import diff_metrics
+
+    a = {"revenue": {"value": 100.0}}                # only revenue
+    b = {"net_income": {"value": 50.0}}              # only net income — no overlap
+
+    out = diff_metrics(a, b)
+    # Both metrics show up in metric_comparisons but as None (not comparable)
+    assert out["metric_comparisons"]["revenue"] is None
+    assert out["metric_comparisons"]["net_income"] is None
+    assert out["summary"]["total_metrics_compared"] == 0
+
+
+def test_diff_metrics_summary_counts_changes_correctly():
+    """Summary counters must match the underlying metric diffs."""
+    from app.services.financial.comparison import diff_metrics
+
+    a = {
+        "revenue":     {"value": 100.0},
+        "net_income":  {"value": 50.0},
+        "gross_margin": {"percentage": 40.0},
+    }
+    b = {
+        "revenue":     {"value": 100.0},   # flat
+        "net_income":  {"value": 60.0},    # +20% — significant
+        "gross_margin": {"percentage": 41.0},  # +2.5%
+    }
+
+    out = diff_metrics(a, b)
+    assert out["summary"]["total_metrics_compared"] == 3
+    assert out["summary"]["metrics_with_changes"] == 2  # net_income + gross_margin
+    assert len(out["summary"]["significant_changes"]) == 1  # only net_income > 10%
+
+
+# ── Heuristic narrative fallback ─────────────────────────────────────────────
+def test_heuristic_narrative_with_significant_changes():
+    """When LLM is unavailable, _heuristic_narrative summarises significant moves."""
+    from app.services.financial.comparison import _heuristic_narrative
+
+    diff = {
+        "summary": {
+            "significant_changes": [
+                {"metric": "revenue",    "percentage_change": -12.5, "direction": "decrease"},
+                {"metric": "net_income", "percentage_change":  18.3, "direction": "increase"},
+            ],
+        },
+    }
+    narrative = _heuristic_narrative(diff)
+    assert "revenue decreased" in narrative.lower()
+    assert "net income increased" in narrative.lower()
+    # Magnitudes appear as absolutes
+    assert "12.5" in narrative
+    assert "18.3" in narrative
+
+
+def test_heuristic_narrative_with_no_changes():
+    """If nothing crossed the 10% threshold the fallback emits a stable-period sentence."""
+    from app.services.financial.comparison import _heuristic_narrative
+
+    narrative = _heuristic_narrative({"summary": {"significant_changes": []}})
+    assert "stable" in narrative.lower()
