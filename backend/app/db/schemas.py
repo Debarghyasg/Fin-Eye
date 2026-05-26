@@ -11,7 +11,7 @@ Naming convention
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -161,6 +161,69 @@ class QueryResponse(_Base):
     sources: List[SourceReference]
     latency_ms: int
     model_used: str
+
+
+# ── Document Comparison (Phase 3 Week 5) ─────────────────────────────────────
+class DocumentComparisonRequest(_Base):
+    document_a_id: str = Field(..., description="First document ID (earlier period / baseline)")
+    document_b_id: str = Field(..., description="Second document ID (later period / comparison)")
+    include_sentiment: bool = Field(default=True, description="Run FinBERT sentiment analysis")
+    include_narrative: bool = Field(default=True, description="Generate LLM narrative summary")
+
+
+class FinancialMetricComparison(_Base):
+    metric_name: str
+    old_value: Optional[float] = None
+    new_value: Optional[float] = None
+    absolute_change: Optional[float] = None
+    percentage_change: Optional[float] = None
+    direction: str  # "increase" | "decrease" | "flat"
+    significance: str  # "major" | "moderate" | "minor" | "negligible" | "unknown"
+
+
+class DocumentComparisonResult(_Base):
+    comparison_id: str
+    status: str  # "processing" | "completed" | "failed"
+    documents: Dict[str, Any]
+    financial_metrics: List[FinancialMetricComparison] = []
+    risk_factor_changes: Optional[Dict[str, Any]] = None
+    guidance_change: Optional[Dict[str, Any]] = None
+    sentiment_analysis: Optional[Dict[str, Any]] = None
+    narrative_summary: Optional[str] = None
+    summary_statistics: Dict[str, Any] = {}
+    processing_time_ms: Optional[int] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+
+
+class DocumentComparisonListItem(_Base):
+    id: str
+    workspace_id: str
+    document_a_id: str
+    document_b_id: str
+    status: str
+    total_metrics_compared: int
+    metrics_with_significant_changes: int
+    overall_sentiment_shift: Optional[str]
+    processing_time_ms: Optional[int]
+    created_at: datetime
+
+
+# ── Sentiment Analysis ───────────────────────────────────────────────────────
+class SentimentAnalysisRequest(_Base):
+    document_id: str
+
+
+class SentimentAnalysisResult(_Base):
+    analysis_id: str
+    document_id: str
+    overall_sentiment: Dict[str, float]  # {positive, neutral, negative}
+    dominant_sentiment: str
+    confidence: str  # "high" | "medium" | "low"
+    sections_analyzed: int
+    section_details: List[Dict[str, Any]] = []
+    model_used: str
+    created_at: datetime
 
 
 # ── Analytics ─────────────────────────────────────────────────────────────────

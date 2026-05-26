@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.1-70b-versatile"   # best free model
     GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"  # faster fallback
 
+    # ── OpenAI (for advanced financial intelligence features) ────────────────
+    # GPT-4o for structured financial metrics extraction and analysis
+    OPENAI_API_KEY: str = Field(default="", description="OpenAI API key for GPT-4o")
+    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_FALLBACK_MODEL: str = "gpt-4o-mini"
+
     # ── FREE: Local embeddings (HuggingFace) ──────────────────────
     # No account, no API key — runs entirely on CPU in Docker
     # Model downloads ~90 MB on first run, cached in /app/.cache

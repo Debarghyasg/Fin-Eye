@@ -312,3 +312,94 @@ class AnalyticsSummary(Base):
 
     def __repr__(self) -> str:
         return f"<AnalyticsSummary id={self.id!r} query_log={self.query_log_id!r}>"
+
+
+# ── document_comparisons ──────────────────────────────────────────────────────
+class DocumentComparison(Base):
+    """
+    Stores results of financial document comparisons for future reference.
+    
+    Each comparison analyzes two documents and extracts financial metrics,
+    sentiment analysis, and percentage changes between reporting periods.
+    """
+    __tablename__ = "document_comparisons"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    
+    # Documents being compared
+    document_a_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    document_b_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    
+    # Comparison results (stored as JSON)
+    financial_metrics_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    sentiment_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    narrative_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Summary statistics
+    total_metrics_compared: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metrics_with_significant_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overall_sentiment_shift: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # positive/negative/stable
+    
+    # Processing metadata
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="processing")  # processing/completed/failed
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentComparison id={self.id!r} docs={self.document_a_id!r}vs{self.document_b_id!r}>"
+
+
+# ── sentiment_analysis ────────────────────────────────────────────────────────
+class SentimentAnalysis(Base):
+    """
+    Stores FinBERT sentiment analysis results for financial documents.
+    
+    Tracks sentiment over time for management commentary, earnings calls,
+    and other forward-looking statements in financial documents.
+    """
+    __tablename__ = "sentiment_analysis"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    
+    # Sentiment scores (0.0 to 1.0)
+    positive_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    neutral_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    negative_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    
+    # Analysis metadata
+    dominant_sentiment: Mapped[str] = mapped_column(String(20), nullable=False)  # positive/neutral/negative
+    confidence_level: Mapped[str] = mapped_column(String(20), nullable=False)  # high/medium/low
+    sections_analyzed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    # Detailed results (stored as JSON)
+    section_sentiments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    
+    # Model information
+    model_used: Mapped[str] = mapped_column(String(100), nullable=False, default="ProsusAI/finbert")
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<SentimentAnalysis id={self.id!r} doc={self.document_id!r} sentiment={self.dominant_sentiment}>"
