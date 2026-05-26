@@ -149,3 +149,46 @@
   mask-composite: exclude;
   pointer-events: none;
 }
+
+/* ── react-pdf citation highlight (Phase 4 Week 7 Day 5-7) ───────────────── */
+/*
+ * Applied by lib/pdf-highlight.ts to text-layer spans whose contents match
+ * a trigram from the cited excerpt. We override react-pdf's transparent
+ * rendering with a soft fin-green wash + tight bounding box so the
+ * highlighted phrase is unmistakable but readable.
+ */
+.phase4-cite-highlight {
+  background: rgba(34, 162, 105, 0.32) !important;
+  color: hsl(210 40% 98%) !important;
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 1px rgba(34, 162, 105, 0.55),
+    0 0 12px rgba(34, 162, 105, 0.35);
+  padding: 0 1px;
+  /* Animate the highlight in so it's discoverable */
+  animation: phase4-highlight-pulse 1.4s ease-out;
+}
+
+@keyframes phase4-highlight-pulse {
+  0% {
+    background: rgba(34, 162, 105, 0.7);
+    box-shadow:
+      0 0 0 2px rgba(34, 162, 105, 0.85),
+      0 0 24px rgba(34, 162, 105, 0.55);
+  }
+  100% {
+    background: rgba(34, 162, 105, 0.32);
+    box-shadow:
+      0 0 0 1px rgba(34, 162, 105, 0.55),
+      0 0 12px rgba(34, 162, 105, 0.35);
+  }
+}
+
+/* react-pdf strips its own backdrop on the text layer when zoomed; force
+   it back so our highlights stay legible */
+.react-pdf__Page__textContent span {
+  color: transparent;
+}
+.react-pdf__Page__textContent span.phase4-cite-highlight {
+  color: hsl(210 40% 98%) !important;
+}
