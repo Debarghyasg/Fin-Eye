@@ -37,6 +37,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
@@ -55,7 +56,8 @@ from app.db.schemas import (
     PaginatedList,
 )
 from app.services.storage import storage
-from app.services.aws.comprehend import scan_for_pii
+from app.services.compliance.pii_scanner import scan_for_pii
+from app.services.audit import record_audit_event
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -121,6 +123,41 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             await asyncio.to_thread(storage.upload_json, extraction.to_dict(), extracted_key)
             doc.s3_key_extracted = extracted_key
             await db.commit()
+
+            # ── 3.5. Post-extraction PII scan ─────────────────────────────────
+            # This is the authoritative scan — it runs against real extracted
+            # text rather than the raw bytes seen at upload time. Result is
+            # stored on the document row for the audit trail; high-risk PII
+            # does NOT auto-block downstream processing here, but compliance
+            # officers can filter for `pii_scan_passed=false` to review.
+            try:
+                pii_result = await asyncio.to_thread(scan_for_pii, extraction.full_text)
+                doc.pii_scan_passed = pii_result.passed
+                if pii_result.entities:
+                    import json as _json
+                    doc.pii_entities_found = _json.dumps({
+                        "scanner": pii_result.scanner,
+                        "stage": "post_extraction",
+                        "flagged_types": pii_result.flagged_types,
+                        "entities": [
+                            {"type": e.get("Type"), "score": e.get("Score")}
+                            for e in pii_result.entities[:50]
+                        ],
+                    })
+                else:
+                    doc.pii_entities_found = None
+                await db.commit()
+                log.info(
+                    "PII scan complete: document_id=%s passed=%s scanner=%s flagged=%s",
+                    document_id, pii_result.passed, pii_result.scanner,
+                    pii_result.flagged_types,
+                )
+            except Exception as pii_exc:
+                # PII scan failure must NOT block the pipeline.
+                log.warning(
+                    "PII scan failed for document_id=%s: %s — continuing pipeline",
+                    document_id, pii_exc,
+                )
 
             # ── 4. Chunk ──────────────────────────────────────────────────────
             doc.status = DocumentStatus.CHUNKING
@@ -221,6 +258,7 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
 )
 async def upload_document(
     background_tasks: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(...),
     workspace_id: str = Form(...),
     doc_type: str = Form(default="other"),
@@ -306,18 +344,26 @@ async def upload_document(
     doc.s3_key_original = original_s3_key
     doc.status = DocumentStatus.UPLOADED
 
-    # ── PII scan (blocking — must pass before extraction) ─────────────────────
-    pii_result = await asyncio.to_thread(
-        scan_for_pii,
-        file_bytes.decode("utf-8", errors="replace") if mime_type == "text/plain"
-        else f"[binary content — {len(file_bytes)} bytes, PII scan on extracted text in pipeline]",
-    )
-    doc.pii_scan_passed = pii_result.passed
-    if pii_result.entities:
-        import json
-        doc.pii_entities_found = json.dumps(
-            [{"type": e.get("Type"), "score": e.get("Score")} for e in pii_result.entities[:20]]
+    # ── Pre-extraction PII scan (text/plain only, defense-in-depth) ──────────
+    # For PDF/DOCX uploads we cannot read content here; the real scan runs
+    # inside _process_document_pipeline once extraction has produced text.
+    if mime_type == "text/plain":
+        pii_result = await asyncio.to_thread(
+            scan_for_pii,
+            file_bytes.decode("utf-8", errors="replace"),
         )
+        doc.pii_scan_passed = pii_result.passed
+        if pii_result.entities:
+            import json
+            doc.pii_entities_found = json.dumps({
+                "scanner": pii_result.scanner,
+                "stage": "upload",
+                "flagged_types": pii_result.flagged_types,
+                "entities": [
+                    {"type": e.get("Type"), "score": e.get("Score")}
+                    for e in pii_result.entities[:50]
+                ],
+            })
 
     await db.commit()
 
@@ -335,6 +381,26 @@ async def upload_document(
     # ── Kick off background pipeline (local dev) ──────────────────────────────
     background_tasks.add_task(
         _process_document_pipeline, document_id, original_s3_key, mime_type
+    )
+
+    # ── Audit trail (SEC 17a-4) ────────────────────────────────────────────
+    await record_audit_event(
+        db,
+        action="UPLOAD",
+        resource_type="document",
+        resource_id=document_id,
+        user_id=current_user.id,
+        workspace_id=workspace_id,
+        request=request,
+        status_code=status.HTTP_202_ACCEPTED,
+        metadata={
+            "filename": file.filename,
+            "mime_type": mime_type,
+            "size_bytes": len(file_bytes),
+            "doc_type": doc_type_enum.value,
+            "ticker": doc.ticker,
+            "fiscal_period": fiscal_period,
+        },
     )
 
     return DocumentUploadResponse(
@@ -524,6 +590,7 @@ async def update_document(
 )
 async def delete_document(
     document_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -539,6 +606,11 @@ async def delete_document(
     )
     chunk_count = count_result.scalar_one()
     workspace_id = doc.workspace_id
+
+    # Capture mutable doc fields BEFORE the delete so the audit row written
+    # afterwards still has access to filename and ticker.
+    audit_filename = doc.original_filename
+    audit_ticker = doc.ticker
 
     # ── Delete storage objects (best-effort) ──────────────────────────────────
     for s3_key in filter(None, [doc.s3_key_original, doc.s3_key_extracted]):
@@ -570,5 +642,22 @@ async def delete_document(
         log.info("BM25 index rebuilt after deletion: workspace=%s", workspace_id)
     except Exception as exc:
         log.warning("BM25 rebuild failed after document delete: %s", exc)
+
+    # ── Audit trail (SEC 17a-4) ────────────────────────────────────────────
+    await record_audit_event(
+        db,
+        action="DELETE",
+        resource_type="document",
+        resource_id=document_id,
+        user_id=current_user.id,
+        workspace_id=workspace_id,
+        request=request,
+        status_code=status.HTTP_204_NO_CONTENT,
+        metadata={
+            "filename": audit_filename,
+            "ticker": audit_ticker,
+            "chunk_count": chunk_count,
+        },
+    )
 
     # Commit happens in get_db() on clean exit

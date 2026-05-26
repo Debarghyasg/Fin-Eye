@@ -7,6 +7,13 @@ USE_S3=true  (paid upgrade)   → files go to AWS S3
 All route and pipeline code imports `storage` from here.
 No other file should import from app.services.aws.s3 directly.
 
+Encryption at rest
+------------------
+When ``ENCRYPT_AT_REST=true`` and a ``FERNET_KEY`` is configured, every blob is
+transparently encrypted before it leaves this module on the way to disk/S3 and
+decrypted on read. See ``app.core.encryption`` for the magic-byte format.
+Legacy unencrypted blobs round-trip unchanged (no migration needed).
+
 Public API
 ----------
   storage.upload(data, key, content_type, metadata) → str (key)
@@ -25,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.core.encryption import decrypt_bytes, encrypt_bytes, encryption_enabled
 
 log = logging.getLogger(__name__)
 
@@ -115,10 +123,17 @@ def extracted_key(document_id: str) -> str:
 
 # ── Public interface ──────────────────────────────────────────────────────────
 class _Storage:
-    """Unified storage interface. Delegates to local or S3 based on settings."""
+    """Unified storage interface. Delegates to local or S3 based on settings.
+
+    Encryption-at-rest is applied here (not in the backends) so both the local
+    and S3 paths get it for free, and the on-the-wire format is identical
+    regardless of where the blob ends up. JSON helpers funnel through
+    :meth:`upload` / :meth:`download` so they inherit the same behaviour.
+    """
 
     def __init__(self):
         self._backend: _LocalStorage | _S3Storage | None = None
+        self._announced_encryption = False
 
     def _get(self):
         if self._backend is None:
@@ -127,17 +142,29 @@ class _Storage:
                 log.info("Storage backend: AWS S3 bucket=%s", settings.S3_BUCKET_NAME)
             else:
                 self._backend = _LocalStorage(settings.LOCAL_STORAGE_PATH)
+            if not self._announced_encryption:
+                log.info(
+                    "Storage encryption-at-rest: %s",
+                    "enabled (Fernet AES-128-CBC + HMAC-SHA256)"
+                    if encryption_enabled() else "disabled (plaintext)",
+                )
+                self._announced_encryption = True
         return self._backend
 
     def upload(self, data: bytes, key: str, content_type: str = "application/octet-stream",
                metadata: dict | None = None) -> str:
-        return self._get().upload(data, key, content_type, metadata)
+        # Encrypt BEFORE handing to backend so disk/S3 only ever sees ciphertext.
+        return self._get().upload(encrypt_bytes(data), key, content_type, metadata)
 
     def download(self, key: str) -> bytes:
-        return self._get().download(key)
+        # Backend returns whatever is on disk/S3; decrypt_bytes handles both
+        # encrypted (magic-prefixed) and legacy plaintext blobs transparently.
+        return decrypt_bytes(self._get().download(key))
 
     def upload_json(self, payload: dict, key: str) -> str:
-        return self._get().upload_json(payload, key)
+        # Funnel through self.upload() so JSON gets encrypted too.
+        data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        return self.upload(data, key, content_type="application/json")
 
     def delete(self, key: str) -> None:
         self._get().delete(key)

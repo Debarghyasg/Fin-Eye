@@ -335,3 +335,31 @@ class TickerSubscriptionOut(_Base):
     last_edgar_check_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+
+
+
+# ── Audit log (PR 1 — SEC Rule 17a-4) ─────────────────────────────────────────
+class AuditLogOut(_Base):
+    """Read-only projection of an ``audit_logs`` row.
+
+    The free-form JSON column is exposed as ``audit_metadata`` (matching the
+    ORM attribute) rather than ``metadata`` to side-step Pydantic v2's
+    reserved-name handling.
+    """
+    id: str
+    workspace_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+    action: str
+    resource_type: str
+    resource_id: Optional[str] = None
+
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    request_id: Optional[str] = None
+    status_code: Optional[int] = None
+
+    audit_metadata: Optional[Dict[str, Any]] = None
+
+    created_at: datetime
+    expires_at: datetime
