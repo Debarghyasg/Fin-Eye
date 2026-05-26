@@ -85,23 +85,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Don't crash — DB may already be up to date in some envs
         # (e.g. running tests against an in-memory DB)
 
-    # Ensure S3 bucket exists
-    try:
-        import asyncio
-        from app.services.aws.s3 import ensure_bucket_exists
-        await asyncio.to_thread(ensure_bucket_exists)
-        log.info("s3_bucket_ready", bucket=settings.S3_BUCKET_NAME)
-    except Exception as exc:
-        log.warning("s3_bucket_check_failed", error=str(exc))
+    # Ensure S3 bucket exists (if enabled)
+    if settings.USE_S3:
+        try:
+            import asyncio
+            from app.services.aws.s3 import ensure_bucket_exists
+            await asyncio.to_thread(ensure_bucket_exists)
+            log.info("s3_bucket_ready", bucket=settings.S3_BUCKET_NAME)
+        except Exception as exc:
+            log.warning("s3_bucket_check_failed", error=str(exc))
 
-    # Ensure SQS queue exists
-    try:
-        import asyncio
-        from app.services.aws.sqs import ensure_queue_exists
-        await asyncio.to_thread(ensure_queue_exists)
-        log.info("sqs_queue_ready")
-    except Exception as exc:
-        log.warning("sqs_queue_check_failed", error=str(exc))
+    # Ensure SQS queue exists (if enabled)
+    if settings.USE_SQS:
+        try:
+            import asyncio
+            from app.services.aws.sqs import ensure_queue_exists
+            await asyncio.to_thread(ensure_queue_exists)
+            log.info("sqs_queue_ready")
+        except Exception as exc:
+            log.warning("sqs_queue_check_failed", error=str(exc))
+
+    # Ensure DynamoDB audit table exists (if enabled)
+    if settings.USE_DYNAMODB:
+        try:
+            import asyncio
+            from app.services.aws.dynamodb import ensure_audit_table_exists
+            await asyncio.to_thread(ensure_audit_table_exists)
+            log.info("dynamodb_audit_table_ready", table=settings.DYNAMODB_AUDIT_TABLE)
+        except Exception as exc:
+            log.warning("dynamodb_audit_check_failed", error=str(exc))
 
     yield  # ← app is now serving requests
 

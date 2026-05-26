@@ -109,6 +109,11 @@ class Settings(BaseSettings):
     USE_SQS: bool = False
     SQS_DOCUMENT_QUEUE_URL: str = "http://localhost:4566/000000000000/finsight-documents"
 
+    # ── DynamoDB audit logging ────────────────────────────────────────────────
+    USE_DYNAMODB: bool = False  # Set to True to enable DynamoDB audit logging
+    DYNAMODB_AUDIT_TABLE: str = "finsight-query-audit"
+    DYNAMODB_TTL_DAYS: int = 2555  # 7 years for SEC compliance (17a-4)
+
     # ── Re-ranker (cross-encoder, local CPU) ──────────────────────
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANKER_TOP_N: int = 5
