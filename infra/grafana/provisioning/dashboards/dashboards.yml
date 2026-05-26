@@ -1,0 +1,16 @@
+## Auto-load every JSON dashboard under /var/lib/grafana/dashboards on
+## container start. Files dropped into infra/grafana/dashboards/ become
+## available immediately under the FinSight folder in the Grafana UI.
+
+apiVersion: 1
+
+providers:
+  - name: FinSight
+    folder: FinSight
+    type: file
+    allowUiUpdates: true
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

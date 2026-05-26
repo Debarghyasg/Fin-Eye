@@ -170,6 +170,36 @@ class Settings(BaseSettings):
     SES_FROM_ADDRESS: str = "alerts@finsight.local"
     APP_URL: str = "http://localhost:3000"  # public dashboard URL used in email links
 
+    # ── Email backend (PR 3 — Mailhog dev SMTP / SES prod) ────────────────────
+    # Resolution order, first hit wins:
+    #   1. USE_SES=true              → AWS SES (production)
+    #   2. SMTP_HOST is non-empty    → SMTP (Mailhog in dev, Gmail/SES in prod)
+    #   3. neither                   → log-only (no email leaves the box)
+    # Mailhog has zero auth and listens on port 1025 in the docker-compose
+    # service of the same name. Web UI on http://localhost:8025.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 1025
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = False     # leave False for Mailhog; True for Gmail/Office365
+    EMAIL_FROM_ADDRESS: str = ""    # falls back to SES_FROM_ADDRESS if blank
+
+    # ── Object storage backend toggle (PR 3 — SeaweedFS dev / S3 prod) ───────
+    # SeaweedFS speaks the S3 API, so it reuses the existing _S3Storage class.
+    # When ``USE_SEAWEEDFS=true`` (compose default) AWS_ENDPOINT_URL is
+    # overridden to point at the seaweedfs container and USE_S3 is forced
+    # true regardless of its declared value. To use real AWS S3 in prod, set
+    # USE_SEAWEEDFS=false + USE_S3=true and leave AWS_ENDPOINT_URL blank.
+    USE_SEAWEEDFS: bool = False
+    SEAWEEDFS_S3_ENDPOINT: str = "http://seaweedfs:8333"
+
+    # ── Observability (PR 3 — Prometheus + Grafana) ───────────────────────────
+    # When True, /metrics is exposed and Prometheus scrapes the FastAPI
+    # process. Grafana provisions a dashboard pointing at the Prometheus
+    # service (see infra/grafana/provisioning).
+    ENABLE_PROMETHEUS: bool = True
+    PROMETHEUS_METRICS_PATH: str = "/metrics"
+
     # ── SEC EDGAR poller (Phase 3 — proactive filings) ───────────────────────
     USE_EDGAR_POLLER: bool = False
     EDGAR_POLL_INTERVAL_SECONDS: int = 3600  # 1 hour
@@ -198,6 +228,23 @@ class Settings(BaseSettings):
         if v.upper() not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {allowed}")
         return v.upper()
+
+    # ── PR 3 helpers: SeaweedFS-aware S3 settings ─────────────────────────────
+    @property
+    def effective_use_s3(self) -> bool:
+        """True when the storage layer should use the S3 backend.
+
+        SeaweedFS speaks S3, so enabling it implicitly enables the S3
+        backend regardless of the ``USE_S3`` flag.
+        """
+        return self.USE_S3 or self.USE_SEAWEEDFS
+
+    @property
+    def effective_s3_endpoint_url(self) -> str | None:
+        """Endpoint URL boto3 should hit. SeaweedFS wins over manual override."""
+        if self.USE_SEAWEEDFS:
+            return self.SEAWEEDFS_S3_ENDPOINT
+        return self.AWS_ENDPOINT_URL
 
 
 @lru_cache(maxsize=1)

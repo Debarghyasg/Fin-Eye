@@ -21,14 +21,18 @@ log = logging.getLogger(__name__)
 
 
 def _s3_client() -> Any:
-    """Build a boto3 S3 client. Endpoint URL is None for real AWS."""
+    """Build a boto3 S3 client. Endpoint URL is None for real AWS, set
+    to LocalStack for AWS mocking, or to the SeaweedFS container in dev
+    (PR 3) when ``USE_SEAWEEDFS=true`` — the property on Settings hides
+    the ordering."""
     kwargs: dict[str, Any] = dict(
         region_name=settings.AWS_REGION,
         aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
     )
-    if settings.AWS_ENDPOINT_URL:
-        kwargs["endpoint_url"] = settings.AWS_ENDPOINT_URL
+    endpoint = settings.effective_s3_endpoint_url
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
     return boto3.client("s3", **kwargs)
 
 

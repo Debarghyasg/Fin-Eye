@@ -85,15 +85,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Don't crash — DB may already be up to date in some envs
         # (e.g. running tests against an in-memory DB)
 
-    # Ensure S3 bucket exists (if enabled)
-    if settings.USE_S3:
+    # Ensure S3 bucket exists (real S3, LocalStack, or SeaweedFS — they all
+    # share the same boto3 head_bucket / create_bucket flow).
+    if settings.effective_use_s3:
         try:
             import asyncio
             from app.services.aws.s3 import ensure_bucket_exists
             await asyncio.to_thread(ensure_bucket_exists)
-            log.info("s3_bucket_ready", bucket=settings.S3_BUCKET_NAME)
+            log.info(
+                "object_storage_ready",
+                bucket=settings.S3_BUCKET_NAME,
+                backend="seaweedfs" if settings.USE_SEAWEEDFS else "s3",
+            )
         except Exception as exc:
-            log.warning("s3_bucket_check_failed", error=str(exc))
+            log.warning("object_storage_check_failed", error=str(exc))
 
     # Ensure SQS queue exists (if enabled)
     if settings.USE_SQS:
@@ -163,6 +168,29 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.ENVIRONMENT != "production" else None,
         lifespan=lifespan,
     )
+
+    # ── Prometheus metrics (PR 3 — observability) ─────────────────────────
+    # Auto-instruments every route. Exposes /metrics for the prometheus
+    # container to scrape. Request counter, latency histogram, in-flight
+    # gauge — all standard. Production swap: scrape from CloudWatch via
+    # a sidecar exporter; the metric NAMES match Prometheus conventions
+    # so Grafana dashboards port unchanged.
+    if settings.ENABLE_PROMETHEUS:
+        try:
+            from prometheus_fastapi_instrumentator import Instrumentator
+            Instrumentator(
+                should_group_status_codes=True,
+                should_ignore_untemplated=True,
+                excluded_handlers=[r".*metrics.*", r".*/health.*"],
+            ).instrument(app).expose(
+                app,
+                endpoint=settings.PROMETHEUS_METRICS_PATH,
+                include_in_schema=False,
+                tags=["observability"],
+            )
+            log.info("prometheus_metrics_enabled", path=settings.PROMETHEUS_METRICS_PATH)
+        except Exception as exc:
+            log.warning("prometheus_init_failed", error=str(exc))
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     app.add_middleware(
