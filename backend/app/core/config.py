@@ -87,15 +87,40 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     EMBEDDING_DIMENSION: int = 384   # fixed for all-MiniLM-L6-v2
 
-    # ── FREE: ChromaDB vector store ───────────────────────────────
-    # Runs as a service in Docker Compose, data persisted on disk
+    # ── FREE: Qdrant vector store (PDF §0) ───────────────────────────────────
+    # Runs as a service in Docker Compose, data persisted on disk.
+    # Production swap to Pinecone Serverless = change QDRANT_URL + QDRANT_API_KEY,
+    # no business-logic changes.
+    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str = ""                            # blank for local Qdrant
+    QDRANT_COLLECTION: str = "finsight_chunks"
+    QDRANT_DENSE_VECTOR_NAME: str = "dense"             # named vector for dense embeddings
+    QDRANT_SPARSE_VECTOR_NAME: str = "sparse"           # named vector for BM25 sparse
+    QDRANT_SPARSE_MODEL: str = "Qdrant/bm25"            # fastembed sparse model id
+
+    # Legacy ChromaDB settings — kept so existing .env files don't error out.
+    # The retriever no longer reads them; remove next major release.
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
     CHROMA_COLLECTION: str = "finsight_chunks"
 
-    # ── FREE: Redis (BM25 cache) ──────────────────────────────────
+    # ── FREE: Redis (cache only — NOT a broker) ──────────────────
+    # Used for query-response caching, ticker-cache hot path, and session data.
+    # The BM25 index that used to live here is gone — Qdrant stores sparse vectors natively.
     REDIS_URL: str = "redis://localhost:6379/0"
-    REDIS_BM25_TTL: int = 604800  # 7 days
+    REDIS_BM25_TTL: int = 604800  # deprecated — kept so legacy .env files load
+
+    # ── FREE: RabbitMQ + Celery (durable async pipeline) ─────────
+    # Replaces FastAPI BackgroundTasks for document processing.
+    # Production swap: change CELERY_BROKER_URL to an AWS SQS URL.
+    CELERY_BROKER_URL: str = "amqp://finsight:finsight_dev@localhost:5672//"
+    CELERY_RESULT_BACKEND: str = "rpc://"               # in-broker results, no extra service
+    CELERY_TASK_DEFAULT_QUEUE: str = "finsight"
+    CELERY_TASK_ALWAYS_EAGER: bool = False              # set True in tests to run inline
+    # Celery Beat schedule for the EDGAR poller. Disabled by default; enable
+    # by running `celery -A app.services.celery_app beat -l info` plus
+    # USE_EDGAR_POLLER=true.
+    EDGAR_POLLER_BEAT_NAME: str = "edgar-poll-every-hour"
 
     # ── FREE: Local file storage ──────────────────────────────────
     # Files stored on Docker volume instead of S3

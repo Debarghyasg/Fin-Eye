@@ -1,21 +1,28 @@
 version: "3.9"
 
 # ════════════════════════════════════════════════════════════════
-#  FinSight AI — 100% FREE local development stack
+#  FinSight AI — 100% FREE local development stack (PR 2)
 #
 #  Services
 #  ────────
-#  db          PostgreSQL 16     → port 5432
-#  redis       Redis 7           → port 6379  (BM25 cache)
-#  chromadb    ChromaDB 0.5      → port 8001  (vector store, FREE)
-#  api         FastAPI           → port 8000
-#  localstack  LocalStack 3      → port 4566  (optional S3/SQS mock)
+#  db          PostgreSQL 16     → 5432
+#  redis       Redis 7           → 6379    (cache only — NOT a broker)
+#  rabbitmq    RabbitMQ 3 mgmt   → 5672 / 15672  (Celery broker + management UI)
+#  qdrant      Qdrant 1.12       → 6333    (vector store — native dense + BM25 sparse)
+#  api         FastAPI           → 8000
+#  worker      Celery worker     → (no port; consumes RabbitMQ)
+#  beat        Celery Beat       → (no port; schedules EDGAR poll)
+#  flower      Celery monitor    → 5555    (management UI for Celery, profile=monitor)
+#  localstack  LocalStack 3      → 4566    (optional S3/SQS mock, profile=aws)
 #
-#  Start everything:
+#  Bring everything up:
 #    docker-compose up
 #
-#  Start without LocalStack (saves ~300 MB RAM):
-#    docker-compose up db redis chromadb api
+#  Bring up the lean dev set (no Flower / LocalStack):
+#    docker-compose up db redis rabbitmq qdrant api worker
+#
+#  Add Celery monitoring (Flower):
+#    docker-compose --profile monitor up
 # ════════════════════════════════════════════════════════════════
 
 services:
@@ -39,7 +46,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Redis (BM25 sparse index cache) ────────────────────────
+  # ── Redis (cache only — Celery uses RabbitMQ) ──────────────
   redis:
     image: redis:7-alpine
     container_name: finsight_redis
@@ -53,20 +60,42 @@ services:
       timeout: 3s
       retries: 10
 
-  # ── ChromaDB (FREE vector store — replaces Pinecone) ────────
-  chromadb:
-    image: chromadb/chroma:0.5.0
-    container_name: finsight_chromadb
+  # ── RabbitMQ (durable Celery broker — replaces Redis-as-broker) ──
+  # PDF §0: Redis is a cache, not a broker. RabbitMQ is the open-source
+  # analog to AWS SQS — durable, dead-letter-aware, ack/nack semantics.
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: finsight_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-finsight}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-finsight_dev}
+    ports:
+      - "5672:5672"      # AMQP
+      - "15672:15672"    # management UI (http://localhost:15672)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Qdrant (vector store — replaces ChromaDB) ──────────────
+  # Native hybrid search: dense (MiniLM 384-d) + BM25 sparse in one query.
+  # Production swap: change QDRANT_URL + QDRANT_API_KEY to Pinecone Serverless.
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: finsight_qdrant
     restart: unless-stopped
     ports:
-      - "8001:8000"          # ChromaDB listens on 8000 inside container
+      - "6333:6333"      # HTTP API
+      - "6334:6334"      # gRPC
     volumes:
-      - chromadata:/chroma/chroma   # persistent vector data
-    environment:
-      IS_PERSISTENT: "TRUE"
-      ANONYMIZED_TELEMETRY: "FALSE"
+      - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      # /readyz returns 200 once the collection store is loaded
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:6333/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -83,22 +112,25 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finsight}:${POSTGRES_PASSWORD:-finsight_dev}@db:5432/${POSTGRES_DB:-finsight}
       REDIS_URL: redis://redis:6379/0
-      CHROMA_HOST: chromadb
-      CHROMA_PORT: 8000        # inside Docker network, ChromaDB is on 8000
+      QDRANT_URL: http://qdrant:6333
+      CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-finsight}:${RABBITMQ_DEFAULT_PASS:-finsight_dev}@rabbitmq:5672//
       LOCAL_STORAGE_PATH: /app/uploads
       USE_S3: "false"
       USE_SQS: "false"
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app          # live-reload in dev
-      - uploads:/app/uploads    # persistent file storage
+      - ./backend:/app
+      - uploads:/app/uploads
+      - hf_cache:/app/.cache         # share HF model cache with workers
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-      chromadb:
+      rabbitmq:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     command: >
       uvicorn app.main:app
@@ -106,11 +138,84 @@ services:
       --port 8000
       --reload
 
-  # ── LocalStack (optional mock AWS — only needed if USE_S3=true) ─
+  # ── Celery worker (consumes RabbitMQ) ───────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finsight_worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finsight}:${POSTGRES_PASSWORD:-finsight_dev}@db:5432/${POSTGRES_DB:-finsight}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-finsight}:${RABBITMQ_DEFAULT_PASS:-finsight_dev}@rabbitmq:5672//
+      LOCAL_STORAGE_PATH: /app/uploads
+      USE_S3: "false"
+    volumes:
+      - ./backend:/app
+      - uploads:/app/uploads          # share uploads dir with the API
+      - hf_cache:/app/.cache
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    # --concurrency=1 because each worker holds a SentenceTransformer + spaCy
+    # model in RAM (~250 MB). Scale with --scale worker=N rather than threads.
+    command: >
+      celery -A app.services.celery_app worker
+      -l info
+      --concurrency=1
+      -Q finsight
+
+  # ── Celery Beat (schedules EDGAR poll) ──────────────────────
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finsight_beat
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finsight}:${POSTGRES_PASSWORD:-finsight_dev}@db:5432/${POSTGRES_DB:-finsight}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-finsight}:${RABBITMQ_DEFAULT_PASS:-finsight_dev}@rabbitmq:5672//
+      USE_EDGAR_POLLER: "true"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: >
+      celery -A app.services.celery_app beat
+      -l info
+      --schedule=/tmp/celerybeat-schedule
+
+  # ── Flower (Celery monitoring, optional) ────────────────────
+  flower:
+    image: mher/flower:2.0
+    container_name: finsight_flower
+    restart: unless-stopped
+    profiles: ["monitor"]
+    environment:
+      CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-finsight}:${RABBITMQ_DEFAULT_PASS:-finsight_dev}@rabbitmq:5672//
+      FLOWER_PORT: "5555"
+    ports:
+      - "5555:5555"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ── LocalStack (optional mock AWS — only when USE_S3=true) ──
   localstack:
     image: localstack/localstack:3
     container_name: finsight_localstack
-    profiles: ["aws"]        # only starts with: docker-compose --profile aws up
+    profiles: ["aws"]
     ports:
       - "4566:4566"
     environment:
@@ -122,6 +227,8 @@ services:
 
 volumes:
   pgdata:
-  chromadata:
+  qdrant_data:
+  rabbitmq_data:
   uploads:
+  hf_cache:
   localstack_data:

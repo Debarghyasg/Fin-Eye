@@ -39,8 +39,11 @@ torch==2.3.1                     # CPU inference only
 transformers==4.45.2             # HuggingFace transformers for FinBERT
 scipy==1.14.1                    # Required for FinBERT preprocessing
 
-# ── FREE: ChromaDB vector store (runs in Docker, no account) ────
-chromadb==0.5.0                  # persistent local vector store
+# ── FREE: Qdrant vector store (Rust, ACORN filtering, native hybrid)
+# Replaces ChromaDB (PDF §0): single-node prototyping → enterprise-grade.
+# fastembed extra ships the Qdrant/bm25 sparse model so dense + BM25 sparse
+# live in the same query — no separate Redis BM25 layer needed.
+qdrant-client[fastembed]==1.12.0
 
 # ── FREE: Groq LLM (Llama 3.1 70B, 14 400 req/day free) ────────
 groq==0.9.0                      # official Groq Python client
@@ -48,10 +51,13 @@ groq==0.9.0                      # official Groq Python client
 # ── OpenAI (GPT-4o for advanced financial intelligence) ──────────
 openai==1.52.0                   # OpenAI Python client for GPT-4o
 
-# ── BM25 sparse retrieval ────────────────────────────────────────
-rank-bm25==0.2.2                 # BM25Okapi index
+# ── FREE: RabbitMQ + Celery (durable broker, replaces Redis-as-broker)
+# PDF §0 explicitly rejects Redis as a broker. Celery talks AMQP to RabbitMQ;
+# swapping to AWS SQS in production is a one-line broker URL change.
+celery[librabbitmq]==5.4.0
+flower==2.0.1                    # optional Celery monitoring UI on :5555
 
-# ── Redis (BM25 index cache) ─────────────────────────────────────
+# ── Redis (response/session cache only — NOT a broker)
 redis[hiredis]==5.0.6            # async Redis client
 
 # ── Compliance: Fernet encryption at rest (PDF §10) ──────────────

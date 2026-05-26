@@ -1,22 +1,28 @@
 """
-Unit tests for the hybrid retriever — Week 11.
+Unit tests for the Qdrant-backed hybrid retriever (PR 2).
 
-The retriever talks to three external systems we DO NOT want in unit tests:
+The retriever in production talks to:
 
-  1. The SentenceTransformer embedding model    → ~90 MB download, slow on CPU
-  2. ChromaDB                                   → requires the chromadb container
-  3. Redis-cached BM25 index                    → requires redis + a built corpus
+  1. The dense ``sentence-transformers`` MiniLM model
+  2. The fastembed ``Qdrant/bm25`` sparse model
+  3. A live Qdrant collection (with server-side RRF)
 
-So these tests stub all three and exercise:
+None of those are appropriate to spin up in a unit-test process — the
+models are slow to download and Qdrant needs its own container. Each test
+stubs the boundary it needs and exercises one of the three behaviours that
+matter at the app layer:
 
-  - The pure RRF merge function with deterministic ranks
-  - ChromaDB filter construction (workspace_id always, document_ids when set)
-  - The retrieval pipeline end-to-end against a fake collection + fake BM25
-  - DB enrichment behaviour (full-text fetch, missing-row skip)
-  - Graceful degradation when ChromaDB raises
+  * ``_qdrant_hybrid_search`` builds the right ``query_points`` request:
+    workspace filter on every prefetch, document_ids filter when supplied,
+    and ``Fusion.RRF`` for the merge query.
+  * ``_enrich_with_db`` joins Qdrant point ids back to ``Chunk`` rows and
+    silently skips orphans.
+  * ``retrieve`` handles a Qdrant outage by returning an empty list rather
+    than 500-ing the request.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,46 +33,46 @@ from app.db.schemas import QueryRequest
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _make_chroma_response(ids: list[str], distances: list[float], metadatas: list[dict]):
-    """Build the dict shape returned by chromadb.Collection.query()."""
-    return {
-        "ids":       [ids],
-        "distances": [distances],
-        "metadatas": [metadatas],
-        "documents": [["text-" + i for i in ids]],
-    }
+class _FakeQdrantClient:
+    """Records the last call to query_points and returns a canned response."""
 
-
-class _FakeCollection:
-    """Stand-in for chromadb.Collection used in retrieval."""
-
-    def __init__(self, response: dict, count: int = 100):
-        self._response = response
-        self._count = count
+    def __init__(self, points):
+        self._points = points
         self.last_kwargs: dict = {}
 
-    def query(self, **kwargs):
+    def query_points(self, **kwargs):
         self.last_kwargs = kwargs
-        return self._response
+        return SimpleNamespace(points=self._points)
 
-    def count(self) -> int:
-        return self._count
+
+def _make_hit(point_id: str, score: float, payload: dict):
+    return SimpleNamespace(id=point_id, score=score, payload=payload)
 
 
 class _FakeEmbedModel:
     """Stand-in for SentenceTransformer.encode()."""
 
     def encode(self, texts, show_progress_bar=False, **kwargs):
-        # Return a deterministic 4-dim vector per input string
         import numpy as np
         return np.array([[0.1, 0.2, 0.3, 0.4] for _ in texts], dtype="float32")
+
+
+class _FakeSparseEmbedding:
+    """fastembed-shape sparse embedding."""
+
+    def __init__(self, indices=(1, 5, 9), values=(0.5, 0.3, 0.2)):
+        import numpy as np
+        self.indices = np.array(indices)
+        self.values = np.array(values)
 
 
 # ── Fixture: workspace + 2 documents + chunks ─────────────────────────────────
 @pytest_asyncio.fixture
 async def populated_workspace(db_session):
     """Insert workspace + 2 documents, each with 3 chunks. Mirrors how chunks
-    are created by the indexing pipeline (pinecone_id = '{doc}_{idx}')."""
+    are created by the indexing pipeline (pinecone_id = uuid5("{doc}_{idx}"))."""
+    from app.services.rag import qdrant_store
+
     ws = Workspace(id="ws-retr", owner_id="test-user-id", name="Retriever WS", is_default=True)
     db_session.add(ws)
     await db_session.flush()
@@ -95,7 +101,8 @@ async def populated_workspace(db_session):
                 chunk_index=i,
                 page_number=i + 1,
                 source_section="MD&A",
-                pinecone_id=f"{doc.id}_{i}",   # same id format ChromaDB stores
+                # Same point-id derivation the embedder uses.
+                pinecone_id=qdrant_store.point_id_for(doc.id, i),
             ))
     db_session.add_all(chunks)
     await db_session.commit()
@@ -103,247 +110,138 @@ async def populated_workspace(db_session):
     return {"workspace": ws, "doc_a": doc_a, "doc_b": doc_b}
 
 
-# ── Pure: RRF merge ──────────────────────────────────────────────────────────
-def test_rrf_merge_combines_dense_and_sparse():
-    """A chunk that ranks high in BOTH lists should beat a chunk that ranks high in only one."""
-    from app.services.rag.retriever import _rrf_merge
+# ── Hybrid query construction ─────────────────────────────────────────────────
+def test_qdrant_hybrid_search_uses_rrf_fusion_and_workspace_filter():
+    """The Qdrant call must use Fusion.RRF and apply the workspace filter."""
+    from qdrant_client.http import models as qm
 
-    dense = [
-        {"chunk_id": "X", "score": 0.95, "rank": 0, "metadata": {}},
-        {"chunk_id": "Y", "score": 0.80, "rank": 1, "metadata": {}},
-    ]
-    sparse = [
-        {"chunk_id": "Y", "score": 5.0, "rank": 0},
-        {"chunk_id": "Z", "score": 4.0, "rank": 1},
-    ]
-    merged = _rrf_merge(dense, sparse, k=60)
+    from app.services.rag import retriever, qdrant_store
 
-    by_id = {item["chunk_id"]: item for item in merged}
-    # Y appears in both → must outrank X (only dense) and Z (only sparse)
-    assert merged[0]["chunk_id"] == "Y"
-    # All three carry separate dense/sparse score fields
-    assert by_id["X"]["dense_score"] == 0.95 and by_id["X"]["sparse_score"] == 0.0
-    assert by_id["Z"]["dense_score"] == 0.0 and by_id["Z"]["sparse_score"] == 4.0
-    # And Y has both populated
-    assert by_id["Y"]["dense_score"] == 0.80
-    assert by_id["Y"]["sparse_score"] == 5.0
+    fake_hits = [_make_hit("pid-A", 0.91, {"document_id": "doc-A"})]
+    fake_client = _FakeQdrantClient(fake_hits)
 
+    sparse_vec = qm.SparseVector(indices=[1, 2], values=[0.4, 0.3])
 
-def test_rrf_merge_handles_empty_inputs():
-    """Both empty → empty list; one empty → other list passes through ordered."""
-    from app.services.rag.retriever import _rrf_merge
-
-    assert _rrf_merge([], [], k=60) == []
-
-    only_dense = _rrf_merge(
-        [{"chunk_id": "A", "score": 0.5, "rank": 0, "metadata": {}}],
-        [],
-        k=60,
-    )
-    assert len(only_dense) == 1
-    assert only_dense[0]["chunk_id"] == "A"
-
-
-def test_rrf_score_decreases_with_rank():
-    """Same-list, lower-rank chunks must outrank higher-rank chunks."""
-    from app.services.rag.retriever import _rrf_merge
-
-    dense = [
-        {"chunk_id": f"id_{i}", "score": 1.0 - 0.1 * i, "rank": i, "metadata": {}}
-        for i in range(5)
-    ]
-    merged = _rrf_merge(dense, [], k=60)
-    ids_in_order = [m["chunk_id"] for m in merged]
-    assert ids_in_order == ["id_0", "id_1", "id_2", "id_3", "id_4"]
-
-
-# ── Filter logic: ChromaDB where-clause construction ─────────────────────────
-def test_chroma_query_filters_by_workspace_only():
-    """No document_ids → simple workspace_id eq filter."""
-    from app.services.rag import retriever
-
-    fake_resp = _make_chroma_response(
-        ids=["doc-A_0"], distances=[0.1],
-        metadatas=[{"workspace_id": "ws-1"}],
-    )
-    fake_coll = _FakeCollection(fake_resp)
-
-    with patch("app.services.document.embedder._get_collection", return_value=fake_coll):
-        results = retriever._chroma_query(
-            vector=[0.1, 0.2, 0.3, 0.4],
+    with patch.object(qdrant_store, "get_client", return_value=fake_client):
+        results = retriever._qdrant_hybrid_search(
+            dense_vec=[0.1, 0.2, 0.3, 0.4],
+            sparse_vec=sparse_vec,
             workspace_id="ws-1",
-            top_k=5,
             document_ids=None,
-        )
-
-    where = fake_coll.last_kwargs["where"]
-    assert where == {"workspace_id": {"$eq": "ws-1"}}
-    # And the response is converted to similarity = 1 - distance
-    assert results[0]["chunk_id"] == "doc-A_0"
-    assert results[0]["score"] == pytest.approx(0.9)
-    assert results[0]["rank"] == 0
-
-
-def test_chroma_query_filters_by_document_ids():
-    """document_ids set → AND-filter with $in clause."""
-    from app.services.rag import retriever
-
-    fake_resp = _make_chroma_response(
-        ids=["doc-A_0", "doc-A_1"], distances=[0.1, 0.2],
-        metadatas=[{}, {}],
-    )
-    fake_coll = _FakeCollection(fake_resp)
-
-    with patch("app.services.document.embedder._get_collection", return_value=fake_coll):
-        retriever._chroma_query(
-            vector=[0.1, 0.2, 0.3, 0.4],
-            workspace_id="ws-1",
             top_k=5,
+        )
+
+    kwargs = fake_client.last_kwargs
+    assert kwargs["limit"] == 5
+    # Two prefetches: dense + sparse, each with the workspace filter
+    prefetches = kwargs["prefetch"]
+    assert len(prefetches) == 2
+    using_names = {p.using for p in prefetches}
+    assert using_names == {"dense", "sparse"}
+    for p in prefetches:
+        # Every prefetch must filter by workspace_id
+        conditions = p.filter.must
+        assert any(
+            getattr(c, "key", None) == "workspace_id"
+            for c in conditions
+        )
+    # The fused query is RRF
+    assert isinstance(kwargs["query"], qm.FusionQuery)
+    assert kwargs["query"].fusion == qm.Fusion.RRF
+
+    # And the response is mapped to the canonical hit shape
+    assert results[0]["chunk_id"] == "pid-A"
+    assert results[0]["rrf_score"] == pytest.approx(0.91)
+    assert results[0]["metadata"]["document_id"] == "doc-A"
+
+
+def test_qdrant_hybrid_search_applies_document_filter():
+    """When document_ids is supplied the prefetch filter gains a doc-match clause."""
+    from app.services.rag import retriever, qdrant_store
+
+    fake_client = _FakeQdrantClient([])
+
+    with patch.object(qdrant_store, "get_client", return_value=fake_client):
+        retriever._qdrant_hybrid_search(
+            dense_vec=[0.1, 0.2, 0.3, 0.4],
+            sparse_vec=MagicMock(),
+            workspace_id="ws-1",
             document_ids=["doc-A", "doc-B"],
+            top_k=5,
         )
 
-    where = fake_coll.last_kwargs["where"]
-    assert "$and" in where
-    clauses = where["$and"]
-    assert {"workspace_id": {"$eq": "ws-1"}} in clauses
-    assert {"document_id":  {"$in": ["doc-A", "doc-B"]}} in clauses
+    prefetch = fake_client.last_kwargs["prefetch"][0]
+    keys = {getattr(c, "key", None) for c in prefetch.filter.must}
+    assert "workspace_id" in keys
+    assert "document_id" in keys
 
 
-def test_chroma_query_clamps_distance_to_zero_floor():
-    """Negative similarity (distance > 1) is clamped to 0.0."""
-    from app.services.rag import retriever
-
-    fake_resp = _make_chroma_response(
-        ids=["doc-A_0"], distances=[1.7],
-        metadatas=[{}],
-    )
-    fake_coll = _FakeCollection(fake_resp)
-
-    with patch("app.services.document.embedder._get_collection", return_value=fake_coll):
-        results = retriever._chroma_query(
-            vector=[0.0] * 4, workspace_id="ws-1", top_k=5, document_ids=None,
-        )
-
-    assert results[0]["score"] == 0.0
-
-
-# ── Enrichment: text fetched from Postgres ────────────────────────────────────
+# ── Postgres enrichment ───────────────────────────────────────────────────────
 @pytest.mark.asyncio
 async def test_enrich_with_db_loads_text_and_skips_unknown(db_session, populated_workspace):
-    """Candidates with a known chunk_id get full text; unknown IDs are dropped."""
+    """Hits whose pinecone_id matches a chunk row get full text; orphans dropped."""
     from app.services.rag.retriever import _enrich_with_db
+    from app.services.rag.qdrant_store import point_id_for
 
     candidates = [
-        {"chunk_id": "doc-A_0", "rrf_score": 0.5, "dense_score": 0.9, "sparse_score": 0.0},
-        {"chunk_id": "missing_99", "rrf_score": 0.4, "dense_score": 0.8, "sparse_score": 0.0},
-        {"chunk_id": "doc-B_2", "rrf_score": 0.3, "dense_score": 0.0, "sparse_score": 4.5},
+        {"chunk_id": point_id_for("doc-A", 0), "rrf_score": 0.5, "dense_score": 0.0, "sparse_score": 0.0},
+        {"chunk_id": "00000000-0000-0000-0000-deadbeef0000", "rrf_score": 0.4, "dense_score": 0.0, "sparse_score": 0.0},
+        {"chunk_id": point_id_for("doc-B", 2), "rrf_score": 0.3, "dense_score": 0.0, "sparse_score": 0.0},
     ]
     enriched = await _enrich_with_db(candidates, db_session)
 
-    chroma_ids = [e["chroma_id"] for e in enriched]
-    assert "doc-A_0" in chroma_ids
-    assert "doc-B_2" in chroma_ids
-    assert "missing_99" not in chroma_ids   # silently skipped
+    qdrant_ids = [e["qdrant_id"] for e in enriched]
+    assert point_id_for("doc-A", 0) in qdrant_ids
+    assert point_id_for("doc-B", 2) in qdrant_ids
+    # Orphan (no DB row) is silently skipped
+    assert "00000000-0000-0000-0000-deadbeef0000" not in qdrant_ids
 
-    a0 = next(e for e in enriched if e["chroma_id"] == "doc-A_0")
+    a0 = next(e for e in enriched if e["qdrant_id"] == point_id_for("doc-A", 0))
     assert "Body of doc-A" in a0["text"]
     assert a0["document_id"] == "doc-A"
     assert a0["page_number"] == 1
-    assert a0["dense_score"] == 0.9
 
 
-# ── Full pipeline: retrieve() with everything mocked ─────────────────────────
+# ── retrieve(): graceful failure ─────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_retrieve_end_to_end(db_session, populated_workspace):
-    """retrieve() should: embed query → call Chroma → call BM25 → RRF → enrich."""
+async def test_retrieve_returns_empty_when_qdrant_raises(db_session, populated_workspace):
+    """A Qdrant outage must not 500 the request — return [] for the generator to handle."""
     from app.services.rag import retriever
-
-    fake_chroma_resp = _make_chroma_response(
-        ids=["doc-A_0", "doc-B_1"], distances=[0.10, 0.30],
-        metadatas=[{"document_id": "doc-A"}, {"document_id": "doc-B"}],
-    )
-    fake_coll = _FakeCollection(fake_chroma_resp)
-    fake_model = _FakeEmbedModel()
-
-    async def fake_bm25(query, workspace_id, top_k, document_ids=None):
-        return [
-            {"chunk_id": "doc-B_1", "score": 6.0, "rank": 0},  # also in dense
-            {"chunk_id": "doc-A_2", "score": 4.0, "rank": 1},  # sparse-only
-        ]
-
-    request = QueryRequest(
-        query="What was revenue?",
-        workspace_id="ws-retr",
-        top_k=5,
-    )
-
-    with patch("app.services.document.embedder._get_embed_model", return_value=fake_model), \
-         patch("app.services.document.embedder._get_collection", return_value=fake_coll), \
-         patch("app.services.rag.retriever.query_bm25", fake_bm25):
-        results = await retriever.retrieve(request, db_session, top_k=5)
-
-    chroma_ids = [r["chroma_id"] for r in results]
-    # All three IDs were enriched
-    assert "doc-A_0" in chroma_ids
-    assert "doc-B_1" in chroma_ids
-    assert "doc-A_2" in chroma_ids
-    # doc-B_1 ranks first because it appears in BOTH dense and sparse
-    assert results[0]["chroma_id"] == "doc-B_1"
-
-
-@pytest.mark.asyncio
-async def test_retrieve_uses_document_ids_filter(db_session, populated_workspace):
-    """When the request restricts to a document, that filter must reach Chroma."""
-    from app.services.rag import retriever
-
-    fake_resp = _make_chroma_response(
-        ids=["doc-A_0"], distances=[0.05], metadatas=[{}],
-    )
-    fake_coll = _FakeCollection(fake_resp)
-    fake_model = _FakeEmbedModel()
-
-    async def fake_bm25(query, workspace_id, top_k, document_ids=None):
-        return []
-
-    request = QueryRequest(
-        query="risk factors",
-        workspace_id="ws-retr",
-        document_ids=["doc-A"],
-        top_k=5,
-    )
-
-    with patch("app.services.document.embedder._get_embed_model", return_value=fake_model), \
-         patch("app.services.document.embedder._get_collection", return_value=fake_coll), \
-         patch("app.services.rag.retriever.query_bm25", fake_bm25):
-        await retriever.retrieve(request, db_session, top_k=5)
-
-    where = fake_coll.last_kwargs["where"]
-    assert "$and" in where
-    assert {"document_id": {"$in": ["doc-A"]}} in where["$and"]
-
-
-@pytest.mark.asyncio
-async def test_retrieve_falls_back_when_chroma_fails(db_session, populated_workspace):
-    """If ChromaDB raises, dense results are empty but BM25 results still flow through."""
-    from app.services.rag import retriever
-
-    fake_model = _FakeEmbedModel()
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("chroma is on fire")
-
-    async def fake_bm25(query, workspace_id, top_k, document_ids=None):
-        return [{"chunk_id": "doc-A_1", "score": 7.5, "rank": 0}]
 
     request = QueryRequest(query="anything", workspace_id="ws-retr", top_k=5)
 
-    with patch("app.services.document.embedder._get_embed_model", return_value=fake_model), \
-         patch("app.services.rag.retriever._chroma_query", side_effect=boom), \
-         patch("app.services.rag.retriever.query_bm25", fake_bm25):
+    def boom(*args, **kwargs):
+        raise RuntimeError("qdrant is on fire")
+
+    with patch("app.services.rag.retriever._embed_query_dense", return_value=[0.0] * 4), \
+         patch("app.services.rag.retriever._embed_query_sparse", return_value=MagicMock()), \
+         patch("app.services.rag.retriever._qdrant_hybrid_search", side_effect=boom):
         results = await retriever.retrieve(request, db_session, top_k=5)
 
-    # We still get the BM25 hit back, enriched with full text
-    assert len(results) == 1
-    assert results[0]["chroma_id"] == "doc-A_1"
-    assert results[0]["dense_score"] == 0.0
-    assert results[0]["sparse_score"] > 0.0
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_retrieve_end_to_end_with_stubbed_hybrid(db_session, populated_workspace):
+    """retrieve() composes encoders + hybrid search + DB enrichment."""
+    from app.services.rag import retriever
+    from app.services.rag.qdrant_store import point_id_for
+
+    request = QueryRequest(query="What was revenue?", workspace_id="ws-retr", top_k=5)
+
+    fake_hits = [
+        {"chunk_id": point_id_for("doc-A", 0), "rrf_score": 0.95, "dense_score": 0.0, "sparse_score": 0.0, "metadata": {}},
+        {"chunk_id": point_id_for("doc-B", 1), "rrf_score": 0.80, "dense_score": 0.0, "sparse_score": 0.0, "metadata": {}},
+    ]
+
+    with patch("app.services.rag.retriever._embed_query_dense", return_value=[0.0] * 4), \
+         patch("app.services.rag.retriever._embed_query_sparse", return_value=MagicMock()), \
+         patch("app.services.rag.retriever._qdrant_hybrid_search", return_value=fake_hits):
+        results = await retriever.retrieve(request, db_session, top_k=5)
+
+    qdrant_ids = [r["qdrant_id"] for r in results]
+    assert point_id_for("doc-A", 0) in qdrant_ids
+    assert point_id_for("doc-B", 1) in qdrant_ids
+    # First hit retains highest RRF score
+    assert results[0]["qdrant_id"] == point_id_for("doc-A", 0)
+    assert results[0]["rrf_score"] == pytest.approx(0.95)

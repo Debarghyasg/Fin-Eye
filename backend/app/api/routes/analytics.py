@@ -114,12 +114,12 @@ async def pipeline_health(
         detail=f"model={settings.EMBEDDING_MODEL}",
     ))
 
-    # ── ChromaDB vector store (local/free) ────────────────────────────────────
+    # ── Qdrant vector store (PR 2) ────────────────────────────────────────────
     stages.append(PipelineStageStatus(
-        stage="ChromaDB",
+        stage="Qdrant",
         status="ok",
         latency_ms=None,
-        detail=f"host={settings.CHROMA_HOST}:{settings.CHROMA_PORT}",
+        detail=f"url={settings.QDRANT_URL} collection={settings.QDRANT_COLLECTION}",
     ))
 
     # ── Groq LLM (free tier) ─────────────────────────────────────────────────

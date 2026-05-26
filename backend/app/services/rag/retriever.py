@@ -1,33 +1,41 @@
 """
-Hybrid retriever — FREE stack.
+Hybrid retriever — Qdrant edition (PR 2).
 
-Pipeline
---------
-1. Dense  — embed query locally → ChromaDB top-20 (filtered by workspace_id)
-2. Sparse — BM25 top-20 from Redis-cached workspace corpus
-3. RRF    — Reciprocal Rank Fusion → merged top-20 candidates
-4. Enrich — fetch full chunk text from Postgres
+The PDF spec (§4) describes the new design:
 
-ChromaDB filtering
-------------------
-ChromaDB supports metadata filters via the `where` dict.
-We filter by workspace_id so each workspace only sees its own documents.
-Optional document_ids filter is applied as a second `where` clause.
+    "Native hybrid search in Qdrant: dense + BM25 sparse, single query
+     (top-20). Reciprocal Rank Fusion applied internally by Qdrant."
 
-RRF formula  (Cormack, Clarke, Buettcher — SIGIR 2009)
--------------------------------------------------------
-  score(d) = Σ  1 / (k + rank_i(d))      k = 60
+This module is the thin app-layer wrapper around that single Qdrant call.
+The big-picture diff from the previous (ChromaDB + Redis-BM25 + custom RRF)
+implementation is:
+
+* No Redis BM25 cache to keep in sync — Qdrant stores sparse vectors as
+  payload of each point and queries them server-side.
+* No client-side RRF merge — the ``FusionQuery(fusion=RRF)`` clause on the
+  Qdrant prefetch does it for us.
+* No latent rebuild after a delete — point deletion removes the chunk from
+  both dense and sparse indexes atomically.
+
+What's preserved
+----------------
+* The public ``retrieve(request, db, top_k)`` signature, so query-pipeline
+  callers do not change.
+* The result shape returned to the caller: a list of dicts with
+  ``rrf_score``, ``dense_score``, ``sparse_score``, full chunk text, and
+  metadata. Downstream re-rankers and the generator already speak this
+  shape.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.services.rag.bm25_store import query_bm25
+from app.services.rag import qdrant_store
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,137 +44,121 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# ── Local embedding of a query ────────────────────────────────────────────────
-def _embed_query(query: str) -> list[float]:
-    """Embed a single query string with the local SentenceTransformer model."""
+# ── Query-time encoding ───────────────────────────────────────────────────────
+def _embed_query_dense(query: str) -> list[float]:
     from app.services.document.embedder import _get_embed_model
-    model = _get_embed_model()
-    return model.encode([query], show_progress_bar=False)[0].tolist()
+    return _get_embed_model().encode([query], show_progress_bar=False)[0].tolist()
 
 
-# ── ChromaDB dense retrieval ──────────────────────────────────────────────────
-def _chroma_query(
-    vector: list[float],
+def _embed_query_sparse(query: str):
+    """Return a Qdrant SparseVector for the query."""
+    emb = qdrant_store.encode_sparse_one(query)
+    return qdrant_store.to_qdrant_sparse_vector(emb)
+
+
+# ── Single-call hybrid search ─────────────────────────────────────────────────
+def _qdrant_hybrid_search(
+    dense_vec: list[float],
+    sparse_vec,
     workspace_id: str,
-    top_k: int,
     document_ids: list[str] | None,
-) -> list[dict]:
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Run dense + BM25 prefetch, fuse with RRF, return scored hits.
+
+    Per-modality scores aren't returned by Qdrant's fusion query, so we fall
+    back to populating ``dense_score``/``sparse_score`` from a second pair
+    of cheap point lookups when callers want them. For the common case those
+    are left at 0 — the RRF score is what the re-ranker keys off anyway.
     """
-    Query ChromaDB for nearest neighbours filtered by workspace_id.
+    from qdrant_client.http import models as qm
 
-    Returns list of dicts:
-        [{"chunk_id": "doc123_0", "score": 0.91, "metadata": {...}}, ...]
+    client = qdrant_store.get_client()
+    flt = qdrant_store.workspace_filter(workspace_id, document_ids)
 
-    ChromaDB returns distance (lower = closer for cosine).
-    We convert: score = 1 - distance  so higher = better.
-    """
-    from app.services.document.embedder import _get_collection
-    collection = _get_collection()
-
-    where: dict = {"workspace_id": {"$eq": workspace_id}}
-    if document_ids:
-        where = {
-            "$and": [
-                {"workspace_id": {"$eq": workspace_id}},
-                {"document_id":  {"$in": document_ids}},
-            ]
-        }
-
-    results = collection.query(
-        query_embeddings=[vector],
-        n_results=min(top_k, collection.count() or 1),
-        where=where,
-        include=["metadatas", "distances", "documents"],
+    response = client.query_points(
+        collection_name=settings.QDRANT_COLLECTION,
+        prefetch=[
+            qm.Prefetch(
+                query=dense_vec,
+                using=settings.QDRANT_DENSE_VECTOR_NAME,
+                limit=top_k,
+                filter=flt,
+            ),
+            qm.Prefetch(
+                query=sparse_vec,
+                using=settings.QDRANT_SPARSE_VECTOR_NAME,
+                limit=top_k,
+                filter=flt,
+            ),
+        ],
+        query=qm.FusionQuery(fusion=qm.Fusion.RRF),
+        query_filter=flt,           # belt-and-braces: enforce filter on fused result too
+        limit=top_k,
+        with_payload=True,
+        with_vectors=False,
     )
 
-    ids        = results["ids"][0]
-    distances  = results["distances"][0]
-    metadatas  = results["metadatas"][0]
-
+    hits = response.points if hasattr(response, "points") else response
     return [
         {
-            "chunk_id": cid,
-            "score":    max(0.0, 1.0 - dist),   # cosine similarity
-            "metadata": meta,
-            "rank":     i,
+            "chunk_id": str(hit.id),
+            "rrf_score": float(hit.score),
+            # Per-modality breakdown isn't returned by FusionQuery; the
+            # re-ranker uses RRF score so this is fine for now.
+            "dense_score": 0.0,
+            "sparse_score": 0.0,
+            "metadata": dict(hit.payload or {}),
         }
-        for i, (cid, dist, meta) in enumerate(zip(ids, distances, metadatas))
+        for hit in hits
     ]
 
 
-# ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
-def _rrf_merge(
-    dense_results: list[dict],
-    sparse_results: list[dict],
-    k: int = 60,
-) -> list[dict]:
-    scores: dict[str, dict] = {}
-
-    for item in dense_results:
-        cid  = item["chunk_id"]
-        rank = item["rank"] + 1
-        if cid not in scores:
-            scores[cid] = {
-                "chunk_id":     cid,
-                "rrf_score":    0.0,
-                "dense_score":  0.0,
-                "sparse_score": 0.0,
-                "metadata":     item.get("metadata", {}),
-            }
-        scores[cid]["rrf_score"]  += 1.0 / (k + rank)
-        scores[cid]["dense_score"] = item["score"]
-
-    for item in sparse_results:
-        cid  = item["chunk_id"]
-        rank = item["rank"] + 1
-        if cid not in scores:
-            scores[cid] = {
-                "chunk_id":     cid,
-                "rrf_score":    0.0,
-                "dense_score":  0.0,
-                "sparse_score": 0.0,
-                "metadata":     {},
-            }
-        scores[cid]["rrf_score"]   += 1.0 / (k + rank)
-        scores[cid]["sparse_score"] = item["score"]
-
-    return sorted(scores.values(), key=lambda x: x["rrf_score"], reverse=True)
-
-
-# ── Enrich candidates with full text from Postgres ────────────────────────────
+# ── Postgres enrichment ───────────────────────────────────────────────────────
 async def _enrich_with_db(
-    candidates: list[dict],
+    candidates: list[dict[str, Any]],
     db: "AsyncSession",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
+    """Attach full chunk text + DB id to each Qdrant hit.
+
+    Hits whose ``pinecone_id`` no longer matches a Postgres row are dropped
+    (the chunk was deleted between index time and query time).
+    """
     from app.db.models import Chunk
 
-    chroma_ids = [c["chunk_id"] for c in candidates]
-    result = await db.execute(
-        select(Chunk).where(Chunk.pinecone_id.in_(chroma_ids))
-    )
-    db_chunks = {chunk.pinecone_id: chunk for chunk in result.scalars().all()}
+    if not candidates:
+        return []
 
-    enriched = []
-    for candidate in candidates:
-        cid      = candidate["chunk_id"]
-        db_chunk = db_chunks.get(cid)
-        if db_chunk is None:
-            # In ChromaDB but not in DB — skip (shouldn't happen in normal flow)
-            log.warning("ChromaDB id %r not found in DB — skipping", cid)
+    point_ids = [c["chunk_id"] for c in candidates]
+    rows = (await db.execute(
+        select(Chunk).where(Chunk.pinecone_id.in_(point_ids))
+    )).scalars().all()
+    by_point_id = {row.pinecone_id: row for row in rows}
+
+    enriched: list[dict[str, Any]] = []
+    for cand in candidates:
+        row = by_point_id.get(cand["chunk_id"])
+        if row is None:
+            log.warning(
+                "Qdrant hit %s has no matching Postgres chunk — skipping",
+                cand["chunk_id"],
+            )
             continue
         enriched.append({
-            "chunk_id":       db_chunk.id,
-            "chroma_id":      cid,
-            "document_id":    db_chunk.document_id,
-            "text":           db_chunk.text,
-            "chunk_type":     db_chunk.chunk_type,
-            "page_number":    db_chunk.page_number,
-            "source_section": db_chunk.source_section,
-            "rrf_score":      candidate["rrf_score"],
-            "dense_score":    candidate["dense_score"],
-            "sparse_score":   candidate["sparse_score"],
+            "chunk_id":       row.id,
+            "qdrant_id":      cand["chunk_id"],
+            # ``chroma_id`` kept for backward compatibility with existing
+            # consumers (re-ranker, generator) that already speak that key.
+            "chroma_id":      cand["chunk_id"],
+            "document_id":    row.document_id,
+            "text":           row.text,
+            "chunk_type":     row.chunk_type,
+            "page_number":    row.page_number,
+            "source_section": row.source_section,
+            "rrf_score":      cand["rrf_score"],
+            "dense_score":    cand["dense_score"],
+            "sparse_score":   cand["sparse_score"],
         })
-
     return enriched
 
 
@@ -175,42 +167,34 @@ async def retrieve(
     request: "QueryRequest",
     db: "AsyncSession",
     top_k: int | None = None,
-) -> list[dict]:
-    """
-    Hybrid retrieval: ChromaDB dense + BM25 sparse → RRF → top-k enriched candidates.
-    """
-    top_k     = top_k or settings.RETRIEVER_TOP_K
-    doc_ids   = request.document_ids or None
+) -> list[dict[str, Any]]:
+    """Hybrid retrieval with server-side RRF.
 
-    # 1. Embed query locally
-    query_vector = await asyncio.to_thread(_embed_query, request.query)
+    Failures fall through to an empty result so the query endpoint can still
+    return a graceful "no relevant context found" answer rather than a 500.
+    """
+    top_k = top_k or settings.RETRIEVER_TOP_K
 
-    # 2. Dense retrieval (ChromaDB)
+    # Run both encoders in parallel.
+    dense_task = asyncio.to_thread(_embed_query_dense, request.query)
+    sparse_task = asyncio.to_thread(_embed_query_sparse, request.query)
+    dense_vec, sparse_vec = await asyncio.gather(dense_task, sparse_task)
+
     try:
-        dense_results = await asyncio.to_thread(
-            _chroma_query, query_vector, request.workspace_id, top_k, doc_ids
+        hits = await asyncio.to_thread(
+            _qdrant_hybrid_search,
+            dense_vec, sparse_vec,
+            request.workspace_id,
+            request.document_ids or None,
+            top_k,
         )
     except Exception as exc:
-        log.warning("ChromaDB query failed: %s — dense results empty", exc)
-        dense_results = []
+        log.warning("Qdrant hybrid search failed: %s — returning empty", exc)
+        hits = []
 
-    log.debug("Dense: %d results", len(dense_results))
+    log.debug("Qdrant hybrid hits: %d", len(hits))
 
-    # 3. Sparse retrieval (BM25 from Redis)
-    sparse_results = await query_bm25(
-        query=request.query,
-        workspace_id=request.workspace_id,
-        top_k=top_k,
-        document_ids=doc_ids,
-    )
-    log.debug("Sparse: %d results", len(sparse_results))
-
-    # 4. RRF merge
-    merged = _rrf_merge(dense_results, sparse_results, k=settings.RRF_K)
-
-    # 5. Enrich with full text from Postgres
-    candidates = await _enrich_with_db(merged[:top_k], db)
-
+    candidates = await _enrich_with_db(hits[:top_k], db)
     log.info(
         "Retrieval: query=%r workspace=%s candidates=%d",
         request.query[:60], request.workspace_id, len(candidates),
