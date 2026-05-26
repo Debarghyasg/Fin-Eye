@@ -1,17 +1,12 @@
 /**
- * Alerts + ticker-subscription API client — Phase 3 Week 6.
+ * Alerts + ticker-subscription API client — Phase 3 Week 6 → refactored
+ * onto the shared apiFetch helper in Phase 4.
  *
- * Backed by the FastAPI endpoints at /api/v1/alerts/*.
- *
- * The existing alerts page (app/(app)/alerts/page.tsx) currently uses
- * mock data via the Zustand store. This client exposes typed fetchers and
- * a `useLiveAlerts` hook so the page can opt into live data when
- * NEXT_PUBLIC_API_URL is set, falling back to mock data otherwise.
+ * Backed by FastAPI endpoints at /api/v1/alerts/*.
  */
 import { useEffect, useState } from "react";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+import { apiFetch, type GetTokenFn } from "./client";
 
 export type AlertType = "anomaly" | "sentiment" | "regulatory" | "filing";
 export type AlertSeverity = "high" | "medium" | "low" | "info";
@@ -81,121 +76,110 @@ export interface ListAlertsParams {
   offset?: number;
 }
 
-// ── HTTP helper ──────────────────────────────────────────────────────────────
-async function authedFetch(
-  path: string,
-  init: RequestInit = {},
-  getToken?: () => Promise<string | null>
-): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-
-  if (getToken) {
-    const token = await getToken();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => response.statusText);
-    throw new Error(`${response.status} ${response.statusText}: ${detail}`);
-  }
-  return response;
-}
-
 // ── Alerts ───────────────────────────────────────────────────────────────────
 export async function listAlerts(
   params: ListAlertsParams = {},
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<AlertListResponse> {
-  const query = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) query.set(k, String(v));
-  });
-  const suffix = query.toString() ? `?${query.toString()}` : "";
-  const response = await authedFetch(`/alerts${suffix}`, {}, getToken);
-  return response.json();
+  return apiFetch<AlertListResponse>("/alerts", { query: params, getToken });
 }
 
 export async function markAlertRead(
   alertId: string,
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<AlertOut> {
-  const response = await authedFetch(
-    `/alerts/${alertId}/read`,
-    { method: "PATCH" },
-    getToken
-  );
-  return response.json();
+  return apiFetch<AlertOut>(`/alerts/${alertId}/read`, {
+    method: "PATCH",
+    getToken,
+  });
 }
 
 export async function markAllAlertsRead(
   workspaceId?: string,
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<{ updated: number }> {
-  const suffix = workspaceId ? `?workspace_id=${workspaceId}` : "";
-  const response = await authedFetch(
-    `/alerts/read-all${suffix}`,
-    { method: "POST" },
-    getToken
-  );
-  return response.json();
+  return apiFetch<{ updated: number }>("/alerts/read-all", {
+    method: "POST",
+    query: workspaceId ? { workspace_id: workspaceId } : undefined,
+    getToken,
+  });
 }
 
 // ── Subscriptions ────────────────────────────────────────────────────────────
 export async function listSubscriptions(
   workspaceId?: string,
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<TickerSubscription[]> {
-  const suffix = workspaceId ? `?workspace_id=${workspaceId}` : "";
-  const response = await authedFetch(
-    `/alerts/subscriptions${suffix}`,
-    {},
-    getToken
-  );
-  return response.json();
+  return apiFetch<TickerSubscription[]>("/alerts/subscriptions", {
+    query: workspaceId ? { workspace_id: workspaceId } : undefined,
+    getToken,
+  });
 }
 
 export async function createSubscription(
   input: CreateSubscriptionInput,
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<TickerSubscription> {
-  const response = await authedFetch(
-    `/alerts/subscriptions`,
-    { method: "POST", body: JSON.stringify(input) },
-    getToken
-  );
-  return response.json();
+  return apiFetch<TickerSubscription>("/alerts/subscriptions", {
+    method: "POST",
+    json: input,
+    getToken,
+  });
 }
 
 export async function updateSubscription(
   subscriptionId: string,
   patch: Partial<Omit<TickerSubscription, "id" | "user_id" | "created_at" | "updated_at">>,
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<TickerSubscription> {
-  const response = await authedFetch(
-    `/alerts/subscriptions/${subscriptionId}`,
-    { method: "PATCH", body: JSON.stringify(patch) },
-    getToken
-  );
-  return response.json();
+  return apiFetch<TickerSubscription>(`/alerts/subscriptions/${subscriptionId}`, {
+    method: "PATCH",
+    json: patch,
+    getToken,
+  });
 }
 
 export async function deleteSubscription(
   subscriptionId: string,
-  getToken?: () => Promise<string | null>
+  getToken?: GetTokenFn
 ): Promise<void> {
-  await authedFetch(
-    `/alerts/subscriptions/${subscriptionId}`,
-    { method: "DELETE" },
-    getToken
-  );
+  await apiFetch(`/alerts/subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+    getToken,
+  });
 }
 
-// ── React hook for live alerts (optional, used by alerts page) ───────────────
+// ── EDGAR ────────────────────────────────────────────────────────────────────
+export interface EdgarPollResult {
+  subscriptions_checked: number;
+  total_new_filings: number;
+  alerts_created: number;
+  emails_sent: number;
+  results: Array<{
+    ticker: string;
+    checked: boolean;
+    new_filings: number;
+    alerts_created: number;
+    error: string | null;
+  }>;
+}
+
+export async function triggerEdgarPoll(
+  dispatchEmails = false,
+  getToken?: GetTokenFn
+): Promise<EdgarPollResult> {
+  return apiFetch<EdgarPollResult>("/alerts/edgar/poll", {
+    method: "POST",
+    query: { dispatch_emails: dispatchEmails },
+    getToken,
+  });
+}
+
+// ── React hook for live alerts (kept for compatibility — pages now prefer
+// React Query directly) ─────────────────────────────────────────────────────
 export function useLiveAlerts(
   params: ListAlertsParams = {},
-  getToken?: () => Promise<string | null>,
+  getToken?: GetTokenFn,
   pollMs = 30_000
 ) {
   const [data, setData] = useState<AlertListResponse | null>(null);

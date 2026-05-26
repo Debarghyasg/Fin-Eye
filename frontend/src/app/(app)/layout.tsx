@@ -1,5 +1,10 @@
 import { AppLayout } from "@/components/layout/AppLayout";
+import { QueryProvider } from "@/components/providers/QueryProvider";
 
 export default function AppGroupLayout({ children }: { children: React.ReactNode }) {
-  return <AppLayout>{children}</AppLayout>;
+  return (
+    <QueryProvider>
+      <AppLayout>{children}</AppLayout>
+    </QueryProvider>
+  );
 }
