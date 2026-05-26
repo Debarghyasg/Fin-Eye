@@ -584,6 +584,7 @@ async def update_document(
 @router.delete(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,  # FastAPI 0.111: prevent auto-derivation from `-> None` annotation
     summary="Delete a document and all its data",
 )
 async def delete_document(

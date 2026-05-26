@@ -276,6 +276,7 @@ async def update_subscription(
 @router.delete(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,  # FastAPI 0.111: prevent auto-derivation from `-> None` annotation
     summary="Unsubscribe from a ticker",
 )
 async def delete_subscription(
