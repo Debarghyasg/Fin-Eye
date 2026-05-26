@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.1-70b-versatile"   # best free model
     GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"  # faster fallback
 
+    # ── OpenAI (for advanced financial intelligence features) ────────────────
+    # GPT-4o for structured financial metrics extraction and analysis
+    OPENAI_API_KEY: str = Field(default="", description="OpenAI API key for GPT-4o")
+    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_FALLBACK_MODEL: str = "gpt-4o-mini"
+
     # ── FREE: Local embeddings (HuggingFace) ──────────────────────
     # No account, no API key — runs entirely on CPU in Docker
     # Model downloads ~90 MB on first run, cached in /app/.cache
@@ -113,6 +119,16 @@ class Settings(BaseSettings):
     USE_DYNAMODB: bool = False  # Set to True to enable DynamoDB audit logging
     DYNAMODB_AUDIT_TABLE: str = "finsight-query-audit"
     DYNAMODB_TTL_DAYS: int = 2555  # 7 years for SEC compliance (17a-4)
+
+    # ── AWS SES email (Phase 3 — alerts) ─────────────────────────────────────
+    USE_SES: bool = False
+    SES_FROM_ADDRESS: str = "alerts@finsight.local"
+    APP_URL: str = "http://localhost:3000"  # public dashboard URL used in email links
+
+    # ── SEC EDGAR poller (Phase 3 — proactive filings) ───────────────────────
+    USE_EDGAR_POLLER: bool = False
+    EDGAR_POLL_INTERVAL_SECONDS: int = 3600  # 1 hour
+    EDGAR_USER_AGENT: str = "FinSight-AI/0.1 (contact@finsight.local)"  # SEC requires this
 
     # ── Re-ranker (cross-encoder, local CPU) ──────────────────────
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"

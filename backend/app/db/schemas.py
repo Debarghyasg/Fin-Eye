@@ -11,7 +11,7 @@ Naming convention
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -163,6 +163,69 @@ class QueryResponse(_Base):
     model_used: str
 
 
+# ── Document Comparison (Phase 3 Week 5) ─────────────────────────────────────
+class DocumentComparisonRequest(_Base):
+    document_a_id: str = Field(..., description="First document ID (earlier period / baseline)")
+    document_b_id: str = Field(..., description="Second document ID (later period / comparison)")
+    include_sentiment: bool = Field(default=True, description="Run FinBERT sentiment analysis")
+    include_narrative: bool = Field(default=True, description="Generate LLM narrative summary")
+
+
+class FinancialMetricComparison(_Base):
+    metric_name: str
+    old_value: Optional[float] = None
+    new_value: Optional[float] = None
+    absolute_change: Optional[float] = None
+    percentage_change: Optional[float] = None
+    direction: str  # "increase" | "decrease" | "flat"
+    significance: str  # "major" | "moderate" | "minor" | "negligible" | "unknown"
+
+
+class DocumentComparisonResult(_Base):
+    comparison_id: str
+    status: str  # "processing" | "completed" | "failed"
+    documents: Dict[str, Any]
+    financial_metrics: List[FinancialMetricComparison] = []
+    risk_factor_changes: Optional[Dict[str, Any]] = None
+    guidance_change: Optional[Dict[str, Any]] = None
+    sentiment_analysis: Optional[Dict[str, Any]] = None
+    narrative_summary: Optional[str] = None
+    summary_statistics: Dict[str, Any] = {}
+    processing_time_ms: Optional[int] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+
+
+class DocumentComparisonListItem(_Base):
+    id: str
+    workspace_id: str
+    document_a_id: str
+    document_b_id: str
+    status: str
+    total_metrics_compared: int
+    metrics_with_significant_changes: int
+    overall_sentiment_shift: Optional[str]
+    processing_time_ms: Optional[int]
+    created_at: datetime
+
+
+# ── Sentiment Analysis ───────────────────────────────────────────────────────
+class SentimentAnalysisRequest(_Base):
+    document_id: str
+
+
+class SentimentAnalysisResult(_Base):
+    analysis_id: str
+    document_id: str
+    overall_sentiment: Dict[str, float]  # {positive, neutral, negative}
+    dominant_sentiment: str
+    confidence: str  # "high" | "medium" | "low"
+    sections_analyzed: int
+    section_details: List[Dict[str, Any]] = []
+    model_used: str
+    created_at: datetime
+
+
 # ── Analytics ─────────────────────────────────────────────────────────────────
 class HealthResponse(_Base):
     status: str
@@ -205,3 +268,70 @@ class AnomalyAlert(_Base):
     title: str
     description: str
     created_at: datetime
+
+
+# ── Alerts API (Phase 3 Week 6) ──────────────────────────────────────────────
+class AlertOut(_Base):
+    id: str
+    workspace_id: str
+    user_id: Optional[str]
+    document_id: Optional[str]
+    ticker: Optional[str]
+    alert_type: str
+    severity: str
+    title: str
+    description: str
+    metric_name: Optional[str] = None
+    metric_value: Optional[float] = None
+    z_score: Optional[float] = None
+    historical_mean: Optional[float] = None
+    historical_stdev: Optional[float] = None
+    sample_size: Optional[int] = None
+    read: bool
+    email_sent: bool
+    created_at: datetime
+
+
+class AlertListResponse(_Base):
+    items: List[AlertOut]
+    total: int
+    unread: int
+
+
+# ── Ticker subscriptions API ─────────────────────────────────────────────────
+class TickerSubscriptionCreate(_Base):
+    workspace_id: str
+    ticker: str = Field(..., min_length=1, max_length=20)
+    company_name: Optional[str] = Field(None, max_length=255)
+    subscribe_anomaly: bool = True
+    subscribe_sentiment: bool = True
+    subscribe_filing: bool = True
+    subscribe_regulatory: bool = False
+    email_notifications: bool = True
+
+
+class TickerSubscriptionUpdate(_Base):
+    company_name: Optional[str] = Field(None, max_length=255)
+    subscribe_anomaly: Optional[bool] = None
+    subscribe_sentiment: Optional[bool] = None
+    subscribe_filing: Optional[bool] = None
+    subscribe_regulatory: Optional[bool] = None
+    email_notifications: Optional[bool] = None
+    active: Optional[bool] = None
+
+
+class TickerSubscriptionOut(_Base):
+    id: str
+    user_id: str
+    workspace_id: str
+    ticker: str
+    company_name: Optional[str]
+    subscribe_anomaly: bool
+    subscribe_sentiment: bool
+    subscribe_filing: bool
+    subscribe_regulatory: bool
+    email_notifications: bool
+    active: bool
+    last_edgar_check_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime

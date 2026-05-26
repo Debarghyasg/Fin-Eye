@@ -312,3 +312,224 @@ class AnalyticsSummary(Base):
 
     def __repr__(self) -> str:
         return f"<AnalyticsSummary id={self.id!r} query_log={self.query_log_id!r}>"
+
+
+# ── document_comparisons ──────────────────────────────────────────────────────
+class DocumentComparison(Base):
+    """
+    Stores results of financial document comparisons for future reference.
+    
+    Each comparison analyzes two documents and extracts financial metrics,
+    sentiment analysis, and percentage changes between reporting periods.
+    """
+    __tablename__ = "document_comparisons"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    
+    # Documents being compared
+    document_a_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    document_b_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    
+    # Comparison results (stored as JSON)
+    financial_metrics_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    sentiment_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    narrative_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Summary statistics
+    total_metrics_compared: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metrics_with_significant_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overall_sentiment_shift: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # positive/negative/stable
+    
+    # Processing metadata
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="processing")  # processing/completed/failed
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentComparison id={self.id!r} docs={self.document_a_id!r}vs{self.document_b_id!r}>"
+
+
+# ── sentiment_analysis ────────────────────────────────────────────────────────
+class SentimentAnalysis(Base):
+    """
+    Stores FinBERT sentiment analysis results for financial documents.
+    
+    Tracks sentiment over time for management commentary, earnings calls,
+    and other forward-looking statements in financial documents.
+    """
+    __tablename__ = "sentiment_analysis"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    
+    # Sentiment scores (0.0 to 1.0)
+    positive_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    neutral_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    negative_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    
+    # Analysis metadata
+    dominant_sentiment: Mapped[str] = mapped_column(String(20), nullable=False)  # positive/neutral/negative
+    confidence_level: Mapped[str] = mapped_column(String(20), nullable=False)  # high/medium/low
+    sections_analyzed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    
+    # Detailed results (stored as JSON)
+    section_sentiments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    
+    # Model information
+    model_used: Mapped[str] = mapped_column(String(100), nullable=False, default="ProsusAI/finbert")
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<SentimentAnalysis id={self.id!r} doc={self.document_id!r} sentiment={self.dominant_sentiment}>"
+
+
+
+# ── metric_history (per-ticker historical metric values for anomaly detection)
+class MetricHistory(Base):
+    """
+    Per-ticker time series of extracted financial metric values.
+
+    Populated whenever a document for a ticker is processed. Anomaly detection
+    pulls historical rows for the same (workspace_id, ticker, metric_name) tuple
+    to compute mean/stdev/Z-score and decide whether to flag the new value.
+    """
+    __tablename__ = "metric_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    metric_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    metric_value: Mapped[float] = mapped_column(Float, nullable=False)
+    fiscal_period: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    # One row per (document, metric) — re-running detection should upsert, not duplicate
+    __table_args__ = (
+        UniqueConstraint("document_id", "metric_name", name="uq_metric_history_doc_metric"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<MetricHistory ticker={self.ticker} {self.metric_name}={self.metric_value}>"
+
+
+# ── alerts (anomaly + sentiment + filing notifications) ───────────────────────
+class Alert(Base):
+    """
+    User-facing alert generated by the anomaly detection or other monitors.
+    SEC 17a-4-style: never updated except `read` and `email_sent` flags.
+    """
+    __tablename__ = "alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    document_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    ticker: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+
+    alert_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # one of: "anomaly" | "sentiment" | "regulatory" | "filing"
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # one of: "high" | "medium" | "low" | "info"
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Statistical fields (populated for anomaly alerts)
+    metric_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    metric_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    z_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    historical_mean: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    historical_stdev: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sample_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    email_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<Alert {self.alert_type}/{self.severity} ticker={self.ticker!r} title={self.title!r}>"
+
+
+# ── ticker_subscriptions (user opt-in for monitoring) ─────────────────────────
+class TickerSubscription(Base):
+    """
+    A user's subscription to a ticker. Drives anomaly notification routing
+    and the SEC EDGAR background poller.
+    """
+    __tablename__ = "ticker_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Per-channel toggles
+    subscribe_anomaly: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    subscribe_sentiment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    subscribe_filing: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    subscribe_regulatory: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+    # SEC EDGAR poller state
+    last_edgar_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_edgar_filing_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    last_edgar_accession: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "ticker", name="uq_ticker_sub_user_ticker"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TickerSubscription user={self.user_id!r} ticker={self.ticker!r} active={self.active}>"

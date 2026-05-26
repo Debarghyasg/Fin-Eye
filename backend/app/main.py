@@ -115,10 +115,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             log.warning("dynamodb_audit_check_failed", error=str(exc))
 
+    # Start EDGAR poller (if enabled)
+    if settings.USE_EDGAR_POLLER:
+        try:
+            from app.services.edgar import start_poller
+            start_poller()
+            log.info("edgar_poller_started", interval=settings.EDGAR_POLL_INTERVAL_SECONDS)
+        except Exception as exc:
+            log.warning("edgar_poller_start_failed", error=str(exc))
+
     yield  # ← app is now serving requests
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("shutting_down")
+
+    # Stop EDGAR poller
+    if settings.USE_EDGAR_POLLER:
+        try:
+            from app.services.edgar import stop_poller
+            await stop_poller()
+        except Exception as exc:
+            log.warning("edgar_poller_stop_failed", error=str(exc))
+
     from app.db.session import engine
     await engine.dispose()
     log.info("db_pool_disposed")
@@ -173,13 +191,17 @@ def create_app() -> FastAPI:
     from app.api.routes.documents import router as documents_router
     from app.api.routes.queries import router as queries_router
     from app.api.routes.analytics import router as analytics_router
+    from app.api.routes.comparisons import router as comparisons_router
+    from app.api.routes.alerts import router as alerts_router
 
     prefix = settings.API_V1_PREFIX
 
-    app.include_router(auth_router,      prefix=prefix)
-    app.include_router(documents_router, prefix=prefix)
-    app.include_router(queries_router,   prefix=prefix)
-    app.include_router(analytics_router, prefix=prefix)
+    app.include_router(auth_router,        prefix=prefix)
+    app.include_router(documents_router,   prefix=prefix)
+    app.include_router(queries_router,     prefix=prefix)
+    app.include_router(analytics_router,   prefix=prefix)
+    app.include_router(comparisons_router, prefix=prefix)
+    app.include_router(alerts_router,      prefix=prefix)
 
     # ── Root ping (no auth — used by Docker healthcheck) ─────────────────────
     @app.get("/", include_in_schema=False)
