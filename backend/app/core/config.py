@@ -120,6 +120,16 @@ class Settings(BaseSettings):
     DYNAMODB_AUDIT_TABLE: str = "finsight-query-audit"
     DYNAMODB_TTL_DAYS: int = 2555  # 7 years for SEC compliance (17a-4)
 
+    # ── AWS SES email (Phase 3 — alerts) ─────────────────────────────────────
+    USE_SES: bool = False
+    SES_FROM_ADDRESS: str = "alerts@finsight.local"
+    APP_URL: str = "http://localhost:3000"  # public dashboard URL used in email links
+
+    # ── SEC EDGAR poller (Phase 3 — proactive filings) ───────────────────────
+    USE_EDGAR_POLLER: bool = False
+    EDGAR_POLL_INTERVAL_SECONDS: int = 3600  # 1 hour
+    EDGAR_USER_AGENT: str = "FinSight-AI/0.1 (contact@finsight.local)"  # SEC requires this
+
     # ── Re-ranker (cross-encoder, local CPU) ──────────────────────
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANKER_TOP_N: int = 5

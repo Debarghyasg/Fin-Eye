@@ -268,3 +268,70 @@ class AnomalyAlert(_Base):
     title: str
     description: str
     created_at: datetime
+
+
+# ── Alerts API (Phase 3 Week 6) ──────────────────────────────────────────────
+class AlertOut(_Base):
+    id: str
+    workspace_id: str
+    user_id: Optional[str]
+    document_id: Optional[str]
+    ticker: Optional[str]
+    alert_type: str
+    severity: str
+    title: str
+    description: str
+    metric_name: Optional[str] = None
+    metric_value: Optional[float] = None
+    z_score: Optional[float] = None
+    historical_mean: Optional[float] = None
+    historical_stdev: Optional[float] = None
+    sample_size: Optional[int] = None
+    read: bool
+    email_sent: bool
+    created_at: datetime
+
+
+class AlertListResponse(_Base):
+    items: List[AlertOut]
+    total: int
+    unread: int
+
+
+# ── Ticker subscriptions API ─────────────────────────────────────────────────
+class TickerSubscriptionCreate(_Base):
+    workspace_id: str
+    ticker: str = Field(..., min_length=1, max_length=20)
+    company_name: Optional[str] = Field(None, max_length=255)
+    subscribe_anomaly: bool = True
+    subscribe_sentiment: bool = True
+    subscribe_filing: bool = True
+    subscribe_regulatory: bool = False
+    email_notifications: bool = True
+
+
+class TickerSubscriptionUpdate(_Base):
+    company_name: Optional[str] = Field(None, max_length=255)
+    subscribe_anomaly: Optional[bool] = None
+    subscribe_sentiment: Optional[bool] = None
+    subscribe_filing: Optional[bool] = None
+    subscribe_regulatory: Optional[bool] = None
+    email_notifications: Optional[bool] = None
+    active: Optional[bool] = None
+
+
+class TickerSubscriptionOut(_Base):
+    id: str
+    user_id: str
+    workspace_id: str
+    ticker: str
+    company_name: Optional[str]
+    subscribe_anomaly: bool
+    subscribe_sentiment: bool
+    subscribe_filing: bool
+    subscribe_regulatory: bool
+    email_notifications: bool
+    active: bool
+    last_edgar_check_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime

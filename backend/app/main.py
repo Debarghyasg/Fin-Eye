@@ -174,6 +174,7 @@ def create_app() -> FastAPI:
     from app.api.routes.queries import router as queries_router
     from app.api.routes.analytics import router as analytics_router
     from app.api.routes.comparisons import router as comparisons_router
+    from app.api.routes.alerts import router as alerts_router
 
     prefix = settings.API_V1_PREFIX
 
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(queries_router,     prefix=prefix)
     app.include_router(analytics_router,   prefix=prefix)
     app.include_router(comparisons_router, prefix=prefix)
+    app.include_router(alerts_router,      prefix=prefix)
 
     # ── Root ping (no auth — used by Docker healthcheck) ─────────────────────
     @app.get("/", include_in_schema=False)
