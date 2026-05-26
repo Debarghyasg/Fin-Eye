@@ -96,11 +96,8 @@ services:
       - "6334:6334"      # gRPC
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:6333/readyz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+    # Qdrant image is distroless — no wget/curl, so we rely on
+    # Compose's `service_started` dependency instead of a healthcheck.
 
   # ── SeaweedFS (S3-compatible object storage — replaces MinIO) ──
   # PDF §0: MinIO Community archived Feb 2026. SeaweedFS is Apache 2.0,
@@ -123,11 +120,8 @@ services:
       -s3.port=8333
       -filer
       -master.volumeSizeLimitMB=1024
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:9333/cluster/status || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+    # SeaweedFS image lacks wget/curl, so we rely on `service_started`
+    # for dependents rather than a healthcheck.
 
   # ── Mailhog (dev SMTP capture — replaces SES in dev) ──────
   # Zero-config: no auth, port 1025 SMTP, port 8025 web UI.
@@ -221,9 +215,9 @@ services:
       rabbitmq:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
       seaweedfs:
-        condition: service_healthy
+        condition: service_started
     command: >
       uvicorn app.main:app
       --host 0.0.0.0
@@ -260,9 +254,9 @@ services:
       rabbitmq:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
       seaweedfs:
-        condition: service_healthy
+        condition: service_started
     # --concurrency=1 because each worker holds a SentenceTransformer + spaCy
     # model in RAM (~250 MB). Scale with --scale worker=N rather than threads.
     command: >
