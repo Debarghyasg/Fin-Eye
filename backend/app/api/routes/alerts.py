@@ -294,3 +294,72 @@ async def delete_subscription(
 
     await db.delete(sub)
     await db.commit()
+
+
+
+# ── POST /alerts/edgar/poll (manual trigger) ─────────────────────────────────
+@router.post(
+    "/edgar/poll",
+    summary="Manually trigger SEC EDGAR poll for the user's subscriptions",
+)
+async def trigger_edgar_poll(
+    dispatch_emails: bool = Query(False, description="Send SES emails for new filings"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Run the SEC EDGAR poller against the current user's active subscriptions
+    immediately. Useful for testing and on-demand refresh — the background
+    scheduler runs hourly when USE_EDGAR_POLLER is enabled.
+
+    Returns a per-ticker summary of new filings, alerts created, and emails sent.
+    """
+    from sqlalchemy import select as _select
+
+    from app.services.edgar import poll_subscription
+
+    subs = (await db.execute(
+        _select(TickerSubscription).where(
+            TickerSubscription.user_id == current_user.id,
+            TickerSubscription.active.is_(True),
+            TickerSubscription.subscribe_filing.is_(True),
+        )
+    )).scalars().all()
+
+    overall = {
+        "subscriptions_checked": 0,
+        "total_new_filings": 0,
+        "alerts_created": 0,
+        "emails_sent": 0,
+        "results": [],
+    }
+
+    for sub in subs:
+        result = await poll_subscription(sub, db, create_alerts=True)
+        overall["subscriptions_checked"] += 1
+        overall["total_new_filings"] += result["new_filings"]
+        overall["alerts_created"] += result["alerts_created"]
+        overall["results"].append(result)
+
+    await db.flush()
+
+    if dispatch_emails and overall["alerts_created"] > 0:
+        from app.services.alerts import dispatch_alert_emails
+
+        new_alerts = (await db.execute(
+            _select(Alert)
+            .where(
+                Alert.alert_type == "filing",
+                Alert.user_id == current_user.id,
+                Alert.email_sent.is_(False),
+            )
+            .order_by(Alert.created_at.desc())
+            .limit(overall["alerts_created"])
+        )).scalars().all()
+        try:
+            overall["emails_sent"] = await dispatch_alert_emails(new_alerts, db)
+        except Exception as exc:
+            log.warning("EDGAR email dispatch failed: %s", exc)
+
+    await db.commit()
+    return overall
