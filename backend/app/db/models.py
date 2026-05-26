@@ -280,3 +280,35 @@ class QueryLog(Base):
 
     def __repr__(self) -> str:
         return f"<QueryLog id={self.id!r} user={self.user_id!r}>"
+
+
+# ── analytics_summary (aggregated metrics for fast queries) ─────────────────────
+class AnalyticsSummary(Base):
+    """
+    Aggregated query metrics for analytics dashboard.
+    
+    Supplements the detailed query_logs with pre-calculated metrics
+    for faster analytics queries without scanning the full audit table.
+    """
+    __tablename__ = "analytics_summary"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    query_log_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("query_logs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    
+    # Pre-calculated metrics
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    citation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unique_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_source_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<AnalyticsSummary id={self.id!r} query_log={self.query_log_id!r}>"

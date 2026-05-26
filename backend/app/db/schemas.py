@@ -136,6 +136,14 @@ class QueryRequest(_Base):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
+class CitationDetail(_Base):
+    """Detailed citation information with document context."""
+    chunk_id: str
+    page_number: Optional[int]
+    excerpt: str
+    document_name: str
+
+
 class SourceReference(_Base):
     document_id: str
     chunk_id: str
@@ -149,6 +157,7 @@ class QueryResponse(_Base):
     query: str
     answer: str
     confidence: float
+    citations: List[CitationDetail]  # Enhanced with structured citations
     sources: List[SourceReference]
     latency_ms: int
     model_used: str

@@ -34,7 +34,7 @@ async def run_query_pipeline(
       retrieve → rerank → generate → log → return
     """
     from app.db.models import QueryLog
-    from app.db.schemas import QueryResponse, SourceReference
+    from app.db.schemas import QueryResponse, SourceReference, CitationDetail
     from app.services.rag.retriever import retrieve
     from app.services.rag.reranker import rerank
     from app.services.rag.generator import generate_answer
@@ -101,6 +101,29 @@ async def run_query_pipeline(
     db.add(query_log)
     await db.commit()
 
+    # ── 5. Comprehensive audit logging (PostgreSQL + DynamoDB) ──────────────────
+    try:
+        from app.services.audit import write_comprehensive_audit_log
+        
+        await write_comprehensive_audit_log(
+            query_log_id=query_log.id,
+            user_id=user_id,
+            workspace_id=request.workspace_id,
+            query_text=request.query,
+            answer_text=generation["answer"],
+            confidence_score=generation["confidence"],
+            source_chunk_ids=[s["chunk_id"] for s in generation["sources"]],
+            source_doc_ids=list({s["document_id"] for s in generation["sources"]}),
+            latency_ms=latency_ms,
+            model_used=generation["model_used"],
+            sources=generation["sources"],
+            citations=generation["citations"],
+            db=db,
+        )
+    except Exception as exc:
+        # Don't fail the request if audit logging fails
+        log.warning("Comprehensive audit logging failed: %s", exc)
+
     log.info(
         "Pipeline complete: workspace=%s latency_ms=%d confidence=%.2f model=%s",
         request.workspace_id, latency_ms,
@@ -112,6 +135,15 @@ async def run_query_pipeline(
         query=request.query,
         answer=generation["answer"],
         confidence=generation["confidence"],
+        citations=[
+            CitationDetail(
+                chunk_id=c["chunk_id"],
+                page_number=c.get("page_number"),
+                excerpt=c["excerpt"],
+                document_name=c["document_name"],
+            )
+            for c in generation["citations"]
+        ],
         sources=[
             SourceReference(
                 document_id=s["document_id"],
@@ -151,6 +183,7 @@ async def _empty_response(request, user_id, db, latency_ms):
         query=request.query,
         answer=msg,
         confidence=0.0,
+        citations=[],  # Empty list for structured citations
         sources=[],
         latency_ms=latency_ms,
         model_used="none",
