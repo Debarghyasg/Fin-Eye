@@ -8,6 +8,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0001"
 down_revision: Union[str, None] = None
@@ -15,8 +16,35 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# ── Enum type definitions ────────────────────────────────────────────────────
+# We declare these as module-level objects with create_type=False so that the
+# CREATE TYPE statements below run exactly once (idempotent via the DO block)
+# and the column definitions reference the existing type by name without
+# attempting to recreate it. ``sa.Enum(name=...)`` without explicit values
+# raises ``ArgumentError`` in SQLAlchemy 2.0, so we use the PostgreSQL-specific
+# ``postgresql.ENUM(...)`` with the values listed.
+_document_status_values = (
+    "pending", "uploading", "uploaded", "extracting", "extracted",
+    "chunking", "chunked", "embedding", "indexed", "failed",
+)
+_chunk_type_values = ("prose", "table", "header")
+_document_type_values = (
+    "10-K", "10-Q", "earnings_call", "annual_report", "prospectus", "other",
+)
+
+document_status_enum = postgresql.ENUM(
+    *_document_status_values, name="document_status_enum", create_type=False,
+)
+chunk_type_enum = postgresql.ENUM(
+    *_chunk_type_values, name="chunk_type_enum", create_type=False,
+)
+document_type_enum = postgresql.ENUM(
+    *_document_type_values, name="document_type_enum", create_type=False,
+)
+
+
 def upgrade() -> None:
-    # ── Enums ─────────────────────────────────────────────────────────────────
+    # ── Enums (idempotent) ────────────────────────────────────────────────────
     op.execute("""
         DO $$ BEGIN
             CREATE TYPE document_status_enum AS ENUM (
@@ -87,16 +115,14 @@ def upgrade() -> None:
         sa.Column("mime_type", sa.String(128), nullable=False),
         sa.Column("file_size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("page_count", sa.Integer(), nullable=True),
-        sa.Column("doc_type",
-                  sa.Enum(name="document_type_enum", create_type=False),
+        sa.Column("doc_type", document_type_enum,
                   nullable=False, server_default="other"),
         sa.Column("company_name", sa.String(255), nullable=True),
         sa.Column("ticker", sa.String(20), nullable=True),
         sa.Column("fiscal_period", sa.String(20), nullable=True),
         sa.Column("s3_key_original", sa.String(1024), nullable=True),
         sa.Column("s3_key_extracted", sa.String(1024), nullable=True),
-        sa.Column("status",
-                  sa.Enum(name="document_status_enum", create_type=False),
+        sa.Column("status", document_status_enum,
                   nullable=False, server_default="pending"),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("pii_scan_passed", sa.Boolean(), nullable=True),
@@ -118,8 +144,7 @@ def upgrade() -> None:
         sa.Column("document_id", sa.String(36),
                   sa.ForeignKey("documents.id", ondelete="CASCADE"), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
-        sa.Column("chunk_type",
-                  sa.Enum(name="chunk_type_enum", create_type=False),
+        sa.Column("chunk_type", chunk_type_enum,
                   nullable=False, server_default="prose"),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("page_number", sa.Integer(), nullable=True),

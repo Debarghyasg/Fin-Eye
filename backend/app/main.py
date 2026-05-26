@@ -81,9 +81,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await asyncio.to_thread(_run_migrations)
         log.info("migrations_applied")
     except Exception as exc:
-        log.error("migration_failed", error=str(exc))
-        # Don't crash — DB may already be up to date in some envs
-        # (e.g. running tests against an in-memory DB)
+        # Log the full traceback so the operator can see what actually failed
+        # — bare str(exc) often hides the SQL error context.
+        log.error("migration_failed", error=str(exc), exc_info=exc)
+        # Fail fast outside development so a broken schema can't masquerade
+        # as a healthy app. In development, keep serving so /docs and the
+        # logs remain reachable for diagnosis.
+        if settings.ENVIRONMENT != "development":
+            raise
 
     # Ensure S3 bucket exists (real S3, LocalStack, or SeaweedFS — they all
     # share the same boto3 head_bucket / create_bucket flow).

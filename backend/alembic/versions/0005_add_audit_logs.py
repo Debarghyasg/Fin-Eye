@@ -95,17 +95,18 @@ def upgrade() -> None:
     op.create_index("ix_audit_logs_action",       "audit_logs", ["action"])
     op.create_index("ix_audit_logs_request_id",   "audit_logs", ["request_id"])
     op.create_index("ix_audit_logs_created_at",   "audit_logs", ["created_at"])
-    # Composite index for the most common query: workspace-scoped, newest-first.
-    op.create_index(
-        "ix_audit_logs_workspace_time",
-        "audit_logs",
-        ["workspace_id", sa.text("created_at DESC")],
+    # Composite indexes for the two most common queries. We use raw SQL because
+    # mixing string column names with ``sa.text("created_at DESC")`` in
+    # ``op.create_index`` is unreliable across SQLAlchemy versions — the DESC
+    # clause sometimes ends up rendered as a column name. Raw SQL is also a
+    # no-op on SQLite (which silently ignores ASC/DESC on indexes).
+    op.execute(
+        "CREATE INDEX ix_audit_logs_workspace_time "
+        "ON audit_logs (workspace_id, created_at DESC)"
     )
-    # Composite index for user-scoped audit (mirrors a DynamoDB GSI).
-    op.create_index(
-        "ix_audit_logs_user_time",
-        "audit_logs",
-        ["user_id", sa.text("created_at DESC")],
+    op.execute(
+        "CREATE INDEX ix_audit_logs_user_time "
+        "ON audit_logs (user_id, created_at DESC)"
     )
 
     # ── Append-only enforcement (PostgreSQL only) ─────────────────────────────
@@ -121,8 +122,9 @@ def downgrade() -> None:
         op.execute(_DROP_TRIGGER_SQL)
         op.execute(_DROP_TRIGGER_FN_SQL)
 
-    op.drop_index("ix_audit_logs_user_time",      table_name="audit_logs")
-    op.drop_index("ix_audit_logs_workspace_time", table_name="audit_logs")
+    # These two were created with raw SQL in upgrade(); drop them the same way.
+    op.execute("DROP INDEX IF EXISTS ix_audit_logs_user_time")
+    op.execute("DROP INDEX IF EXISTS ix_audit_logs_workspace_time")
     op.drop_index("ix_audit_logs_created_at",     table_name="audit_logs")
     op.drop_index("ix_audit_logs_request_id",     table_name="audit_logs")
     op.drop_index("ix_audit_logs_action",         table_name="audit_logs")
