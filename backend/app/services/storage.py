@@ -137,9 +137,21 @@ class _Storage:
 
     def _get(self):
         if self._backend is None:
-            if settings.USE_S3:
+            if settings.effective_use_s3:
                 self._backend = _S3Storage()
-                log.info("Storage backend: AWS S3 bucket=%s", settings.S3_BUCKET_NAME)
+                # PR 3: SeaweedFS uses the S3 backend with a different endpoint —
+                # log the actual endpoint so operators know which one is wired up.
+                endpoint = settings.effective_s3_endpoint_url or "AWS"
+                if settings.USE_SEAWEEDFS:
+                    log.info(
+                        "Storage backend: SeaweedFS bucket=%s endpoint=%s",
+                        settings.S3_BUCKET_NAME, endpoint,
+                    )
+                else:
+                    log.info(
+                        "Storage backend: AWS S3 bucket=%s endpoint=%s",
+                        settings.S3_BUCKET_NAME, endpoint,
+                    )
             else:
                 self._backend = _LocalStorage(settings.LOCAL_STORAGE_PATH)
             if not self._announced_encryption:

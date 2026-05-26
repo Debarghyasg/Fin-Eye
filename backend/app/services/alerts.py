@@ -98,7 +98,10 @@ async def dispatch_alert_emails(
 
     Returns the count of emails successfully dispatched (across all alerts).
     """
-    from app.services.aws.ses import send_alert_email
+    # PR 3: route through the unified backend (SES → SMTP → log-only).
+    # The legacy direct call into ``app.services.aws.ses`` still works
+    # because it's the production path inside :func:`send_alert_email`.
+    from app.services.email import send_alert_email
 
     sent_count = 0
     for alert in alerts:

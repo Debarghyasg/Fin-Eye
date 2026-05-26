@@ -1,0 +1,61 @@
+## ─────────────────────────────────────────────────────────────────────────────
+## FinSight AI — Prometheus scrape configuration (PR 3)
+##
+## Scrapes four sources:
+##   * api      — FastAPI /metrics (instrumented via prometheus-fastapi-
+##                instrumentator). Emits http_requests_total + http_request_
+##                duration_seconds histograms keyed by handler.
+##   * rabbitmq — built-in rabbitmq_prometheus plugin (port 15692, enabled
+##                by default in the rabbitmq:3-management image).
+##   * qdrant   — Qdrant exposes Prometheus-format metrics on its main HTTP
+##                port at /metrics (vector counts, latency, search rate).
+##   * worker   — Celery worker doesn't ship a Prometheus exporter by
+##                default, but Flower's /metrics endpoint covers it when
+##                the monitor profile is up.
+##
+## All targets resolve through Docker Compose's service name DNS.
+## ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: finsight-dev
+
+scrape_configs:
+  # ── FastAPI ──────────────────────────────────────────────────────────────
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: api
+          component: backend
+
+  # ── RabbitMQ (Celery broker) ─────────────────────────────────────────────
+  - job_name: rabbitmq
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+        labels:
+          service: rabbitmq
+          component: broker
+
+  # ── Qdrant (vector store) ────────────────────────────────────────────────
+  - job_name: qdrant
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["qdrant:6333"]
+        labels:
+          service: qdrant
+          component: vector_store
+
+  # ── Flower (Celery monitor — only when --profile monitor is up) ──────────
+  - job_name: flower
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["flower:5555"]
+        labels:
+          service: flower
+          component: worker_monitor

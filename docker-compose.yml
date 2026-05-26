@@ -1,27 +1,31 @@
 version: "3.9"
 
 # ════════════════════════════════════════════════════════════════
-#  FinSight AI — 100% FREE local development stack (PR 2)
+#  FinSight AI — 100% FREE local development stack (PR 1 + PR 2 + PR 3)
 #
 #  Services
 #  ────────
 #  db          PostgreSQL 16     → 5432
 #  redis       Redis 7           → 6379    (cache only — NOT a broker)
-#  rabbitmq    RabbitMQ 3 mgmt   → 5672 / 15672  (Celery broker + management UI)
+#  rabbitmq    RabbitMQ 3 mgmt   → 5672 / 15672 / 15692  (Celery broker + UI + Prom)
 #  qdrant      Qdrant 1.12       → 6333    (vector store — native dense + BM25 sparse)
-#  api         FastAPI           → 8000
+#  seaweedfs   SeaweedFS 3.69    → 8333    (S3-compatible object storage, replaces local FS)
+#  mailhog     Mailhog 1.0       → 1025 / 8025  (SMTP capture + web UI)
+#  prometheus  Prometheus 2.54   → 9090    (metrics scraper)
+#  grafana     Grafana 11        → 3001    (provisioned FinSight dashboard)
+#  api         FastAPI           → 8000    (exposes /metrics for Prometheus)
 #  worker      Celery worker     → (no port; consumes RabbitMQ)
 #  beat        Celery Beat       → (no port; schedules EDGAR poll)
-#  flower      Celery monitor    → 5555    (management UI for Celery, profile=monitor)
-#  localstack  LocalStack 3      → 4566    (optional S3/SQS mock, profile=aws)
+#  flower      Celery monitor    → 5555    (profile=monitor)
+#  localstack  LocalStack 3      → 4566    (profile=aws — only when USE_S3=true with real AWS API)
 #
 #  Bring everything up:
 #    docker-compose up
 #
-#  Bring up the lean dev set (no Flower / LocalStack):
-#    docker-compose up db redis rabbitmq qdrant api worker
+#  Lean dev set (no observability containers):
+#    docker-compose up db redis rabbitmq qdrant seaweedfs mailhog api worker
 #
-#  Add Celery monitoring (Flower):
+#  Observability profile (Prometheus + Grafana + Flower):
 #    docker-compose --profile monitor up
 # ════════════════════════════════════════════════════════════════
 
@@ -61,8 +65,8 @@ services:
       retries: 10
 
   # ── RabbitMQ (durable Celery broker — replaces Redis-as-broker) ──
-  # PDF §0: Redis is a cache, not a broker. RabbitMQ is the open-source
-  # analog to AWS SQS — durable, dead-letter-aware, ack/nack semantics.
+  # Port 15692 exposes the built-in Prometheus exporter (enabled by default
+  # since RabbitMQ 3.8 in the management image).
   rabbitmq:
     image: rabbitmq:3-management
     container_name: finsight_rabbitmq
@@ -73,6 +77,7 @@ services:
     ports:
       - "5672:5672"      # AMQP
       - "15672:15672"    # management UI (http://localhost:15672)
+      - "15692:15692"    # Prometheus metrics (PR 3)
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -82,23 +87,103 @@ services:
       retries: 10
 
   # ── Qdrant (vector store — replaces ChromaDB) ──────────────
-  # Native hybrid search: dense (MiniLM 384-d) + BM25 sparse in one query.
-  # Production swap: change QDRANT_URL + QDRANT_API_KEY to Pinecone Serverless.
   qdrant:
     image: qdrant/qdrant:v1.12.1
     container_name: finsight_qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"      # HTTP API
+      - "6333:6333"      # HTTP API (also serves /metrics for Prometheus)
       - "6334:6334"      # gRPC
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      # /readyz returns 200 once the collection store is loaded
       test: ["CMD-SHELL", "wget -q -O- http://localhost:6333/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # ── SeaweedFS (S3-compatible object storage — replaces MinIO) ──
+  # PDF §0: MinIO Community archived Feb 2026. SeaweedFS is Apache 2.0,
+  # actively maintained since 2012, full S3 API. boto3 calls work unchanged.
+  # Single-binary `weed server -s3` runs master + volume + filer + S3 gateway.
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.69
+    container_name: finsight_seaweedfs
+    restart: unless-stopped
+    ports:
+      - "8333:8333"      # S3 API (boto3 endpoint URL)
+      - "9333:9333"      # master HTTP UI / cluster status
+      - "8888:8888"      # filer HTTP
+    volumes:
+      - seaweedfs_data:/data
+    command: >
+      server
+      -dir=/data
+      -s3
+      -s3.port=8333
+      -filer
+      -master.volumeSizeLimitMB=1024
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Mailhog (dev SMTP capture — replaces SES in dev) ──────
+  # Zero-config: no auth, port 1025 SMTP, port 8025 web UI.
+  # The unified email service in app/services/email.py routes to it
+  # when SMTP_HOST=mailhog (default in .env.example).
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: finsight_mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"      # SMTP
+      - "8025:8025"      # web UI (http://localhost:8025)
+
+  # ── Prometheus (metrics scraper) ────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: finsight_prometheus
+    restart: unless-stopped
+    profiles: ["monitor"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── Grafana (provisioned FinSight dashboard) ────────────────
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: finsight_grafana
+    restart: unless-stopped
+    profiles: ["monitor"]
+    ports:
+      - "3001:3000"      # 3001 host so it doesn't clash with Next.js on 3000
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_FEATURE_TOGGLES_ENABLE: "publicDashboards"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
 
   # ── FastAPI backend ─────────────────────────────────────────
   api:
@@ -116,13 +201,18 @@ services:
       CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-finsight}:${RABBITMQ_DEFAULT_PASS:-finsight_dev}@rabbitmq:5672//
       LOCAL_STORAGE_PATH: /app/uploads
       USE_S3: "false"
+      USE_SEAWEEDFS: "true"
+      SEAWEEDFS_S3_ENDPOINT: http://seaweedfs:8333
       USE_SQS: "false"
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      ENABLE_PROMETHEUS: "true"
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - uploads:/app/uploads
-      - hf_cache:/app/.cache         # share HF model cache with workers
+      - uploads:/app/uploads             # legacy local-fs fallback
+      - hf_cache:/app/.cache             # share HF model cache with workers
     depends_on:
       db:
         condition: service_healthy
@@ -131,6 +221,8 @@ services:
       rabbitmq:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      seaweedfs:
         condition: service_healthy
     command: >
       uvicorn app.main:app
@@ -154,9 +246,13 @@ services:
       CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-finsight}:${RABBITMQ_DEFAULT_PASS:-finsight_dev}@rabbitmq:5672//
       LOCAL_STORAGE_PATH: /app/uploads
       USE_S3: "false"
+      USE_SEAWEEDFS: "true"
+      SEAWEEDFS_S3_ENDPOINT: http://seaweedfs:8333
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
     volumes:
       - ./backend:/app
-      - uploads:/app/uploads          # share uploads dir with the API
+      - uploads:/app/uploads
       - hf_cache:/app/.cache
     depends_on:
       db:
@@ -164,6 +260,8 @@ services:
       rabbitmq:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      seaweedfs:
         condition: service_healthy
     # --concurrency=1 because each worker holds a SentenceTransformer + spaCy
     # model in RAM (~250 MB). Scale with --scale worker=N rather than threads.
@@ -211,7 +309,7 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # ── LocalStack (optional mock AWS — only when USE_S3=true) ──
+  # ── LocalStack (optional mock AWS — only when targeting real AWS API) ──
   localstack:
     image: localstack/localstack:3
     container_name: finsight_localstack
@@ -229,6 +327,9 @@ volumes:
   pgdata:
   qdrant_data:
   rabbitmq_data:
+  seaweedfs_data:
+  prometheus_data:
+  grafana_data:
   uploads:
   hf_cache:
   localstack_data:
