@@ -1,0 +1,32 @@
+[run]
+source = app
+branch = True
+omit =
+    alembic/*
+    tests/*
+    app/main.py
+    # Heavy ML-stack modules are stubbed in tests, never imported.
+    # Listing them here keeps coverage % focused on the logic we actually exercise.
+    app/services/document/embedder.py
+    app/services/rag/reranker.py
+    app/services/rag/generator.py
+    app/services/financial/sentiment.py
+    app/services/aws/comprehend.py
+    app/services/aws/dynamodb.py
+    app/services/aws/ses.py
+    app/services/aws/sqs.py
+    app/services/aws/s3.py
+    app/services/edgar.py
+    app/services/audit.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    \.\.\.
+
+show_missing = True
+skip_covered = False
+precision = 1
