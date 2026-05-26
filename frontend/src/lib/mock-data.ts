@@ -7,10 +7,12 @@ export const mockDocuments = [
     ticker: "AAPL",
     size: 4_820_000,
     pages: 88,
+    chunkCount: 142,
     uploadedAt: new Date(Date.now() - 2 * 3600000),
     status: "indexed" as const,
     tags: ["annual", "sec-filing"],
     confidence: 0.97,
+    processingProgress: 100,
   },
   {
     id: "doc-2",
@@ -20,10 +22,12 @@ export const mockDocuments = [
     ticker: "MSFT",
     size: 1_240_000,
     pages: 24,
+    chunkCount: 38,
     uploadedAt: new Date(Date.now() - 5 * 3600000),
     status: "indexed" as const,
     tags: ["earnings", "q4"],
     confidence: 0.94,
+    processingProgress: 100,
   },
   {
     id: "doc-3",
@@ -33,10 +37,12 @@ export const mockDocuments = [
     ticker: "JPM",
     size: 9_100_000,
     pages: 312,
+    chunkCount: 487,
     uploadedAt: new Date(Date.now() - 1 * 86400000),
     status: "indexed" as const,
     tags: ["annual", "banking"],
     confidence: 0.92,
+    processingProgress: 100,
   },
   {
     id: "doc-4",
@@ -46,10 +52,12 @@ export const mockDocuments = [
     ticker: "TSLA",
     size: 3_560_000,
     pages: 96,
+    chunkCount: 0,
     uploadedAt: new Date(Date.now() - 2 * 86400000),
     status: "processing" as const,
     tags: ["annual", "sec-filing"],
     confidence: 0,
+    processingProgress: 62,
   },
   {
     id: "doc-5",
@@ -59,10 +67,12 @@ export const mockDocuments = [
     ticker: "GOOGL",
     size: 6_230_000,
     pages: 180,
+    chunkCount: 264,
     uploadedAt: new Date(Date.now() - 3 * 86400000),
     status: "indexed" as const,
     tags: ["prospectus"],
     confidence: 0.96,
+    processingProgress: 100,
   },
 ];
 
@@ -212,3 +222,80 @@ export const mockComparisonData = {
   ],
   sentimentShift: { score2022: 0.71, score2023: 0.64, change: -0.07 },
 };
+
+
+
+// ── Phase 4 analytics-page time series ─────────────────────────────────────
+// 30-day rolling windows. Generated deterministically (seeded by index) so
+// the SSR-rendered HTML matches what hydrates on the client.
+function _seededDay(offsetDays: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - (29 - offsetDays));
+  return d.toISOString().slice(5, 10); // "MM-DD"
+}
+
+function _det(seed: number, lo: number, hi: number) {
+  // Deterministic pseudo-random from a seed — not cryptographic
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  const f = x - Math.floor(x);
+  return lo + (hi - lo) * f;
+}
+
+export const mockConfidenceTrend = Array.from({ length: 30 }, (_, i) => {
+  // Slow upward drift in average confidence + a noisy band
+  const trend = 0.83 + i * 0.003;
+  const avg = trend + _det(i + 1, -0.04, 0.04);
+  return {
+    date: _seededDay(i),
+    avg_confidence: Math.max(0.7, Math.min(0.99, +avg.toFixed(3))),
+    p25: Math.max(0.6, +(avg - 0.07 - _det(i + 5, 0, 0.02)).toFixed(3)),
+    p75: Math.min(1.0, +(avg + 0.06 + _det(i + 9, 0, 0.02)).toFixed(3)),
+  };
+});
+
+export const mockTokenUsage = Array.from({ length: 30 }, (_, i) => {
+  const base = 18000 + i * 600;
+  const prompt = Math.round(base + _det(i + 11, -3000, 4000));
+  const completion = Math.round(prompt * 0.35 + _det(i + 17, -800, 1500));
+  return {
+    date: _seededDay(i),
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total: prompt + completion,
+  };
+});
+
+export const mockQueryVolumeTrend = Array.from({ length: 30 }, (_, i) => {
+  const base = 95 + i * 4;
+  const queries = Math.round(base + _det(i + 21, -25, 35));
+  const failed = Math.round(queries * 0.04 + _det(i + 27, 0, 4));
+  return {
+    date: _seededDay(i),
+    queries,
+    successful: queries - failed,
+    failed,
+  };
+});
+
+export const mockQueryTypes = [
+  { name: "Financial metrics", value: 42, color: "#22a269" },
+  { name: "Risk factors", value: 19, color: "#47be85" },
+  { name: "Sentiment", value: 14, color: "#7dd8ab" },
+  { name: "Comparisons", value: 11, color: "#3b82f6" },
+  { name: "Forward guidance", value: 8, color: "#f59e0b" },
+  { name: "Other", value: 6, color: "#94a3b8" },
+];
+
+export const mockMostQueriedDocs = [
+  { id: "doc-1", name: "Apple_10K_2023.pdf", ticker: "AAPL", queries: 312 },
+  { id: "doc-2", name: "MSFT_EarningsQ4_2023.pdf", ticker: "MSFT", queries: 228 },
+  { id: "doc-3", name: "JPM_AnnualReport_2023.pdf", ticker: "JPM", queries: 187 },
+  { id: "doc-5", name: "Google_Prospectus_2024.pdf", ticker: "GOOGL", queries: 143 },
+  { id: "doc-4", name: "Tesla_10K_2023.pdf", ticker: "TSLA", queries: 88 },
+];
+
+export const mockModelMix = [
+  { name: "llama-3.1-70b-versatile", value: 64, color: "#22a269" },
+  { name: "llama-3.1-8b-instant", value: 24, color: "#47be85" },
+  { name: "gpt-4o", value: 12, color: "#3b82f6" },
+];

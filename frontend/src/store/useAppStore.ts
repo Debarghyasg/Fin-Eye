@@ -5,6 +5,16 @@ export type Document = (typeof mockDocuments)[number];
 export type QueryEntry = (typeof mockQueryHistory)[number];
 export type Alert = (typeof mockAlerts)[number];
 
+/**
+ * A clicked source from the SourcesPanel that should open in the document
+ * viewer modal. `excerpt` is highlighted by the viewer overlay.
+ */
+export interface ActiveSource {
+  docId: string;
+  page: number;
+  excerpt: string;
+}
+
 interface AppState {
   // Sidebar
   sidebarCollapsed: boolean;
@@ -14,6 +24,7 @@ interface AppState {
   documents: Document[];
   addDocument: (doc: Document) => void;
   removeDocument: (id: string) => void;
+  updateDocument: (id: string, patch: Partial<Document>) => void;
 
   // Query
   queryHistory: QueryEntry[];
@@ -24,11 +35,31 @@ interface AppState {
   // Alerts
   alerts: Alert[];
   markAlertRead: (id: string) => void;
+  markAllAlertsRead: () => void;
   unreadCount: () => number;
+  addAlert: (a: Alert) => void;
 
-  // Active document for workspace
+  // Active document for the workspace right-rail / viewer
   activeDocId: string | null;
   setActiveDocId: (id: string | null) => void;
+
+  // ── Phase 4 additions ────────────────────────────────────────────────────
+  /**
+   * Document IDs the user has multi-selected to scope queries to.
+   * Empty array means "query across all indexed documents".
+   */
+  selectedDocIds: string[];
+  toggleSelectedDoc: (id: string) => void;
+  setSelectedDocIds: (ids: string[]) => void;
+  clearSelectedDocs: () => void;
+
+  /**
+   * The source the user clicked in the SourcesPanel — used to open the
+   * react-pdf document viewer dialog at the cited page with the excerpt
+   * visually highlighted.
+   */
+  activeSource: ActiveSource | null;
+  setActiveSource: (s: ActiveSource | null) => void;
 
   // Upload state
   uploadProgress: Record<string, number>;
@@ -42,7 +73,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   documents: mockDocuments,
   addDocument: (doc) => set((s) => ({ documents: [doc, ...s.documents] })),
-  removeDocument: (id) => set((s) => ({ documents: s.documents.filter((d) => d.id !== id) })),
+  removeDocument: (id) =>
+    set((s) => ({
+      documents: s.documents.filter((d) => d.id !== id),
+      selectedDocIds: s.selectedDocIds.filter((d) => d !== id),
+      activeDocId: s.activeDocId === id ? null : s.activeDocId,
+    })),
+  updateDocument: (id, patch) =>
+    set((s) => ({
+      documents: s.documents.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+    })),
 
   queryHistory: mockQueryHistory,
   addQuery: (q) => set((s) => ({ queryHistory: [q, ...s.queryHistory] })),
@@ -54,10 +94,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({
       alerts: s.alerts.map((a) => (a.id === id ? { ...a, read: true } : a)),
     })),
+  markAllAlertsRead: () =>
+    set((s) => ({ alerts: s.alerts.map((a) => ({ ...a, read: true })) })),
   unreadCount: () => get().alerts.filter((a) => !a.read).length,
+  addAlert: (a) => set((s) => ({ alerts: [a, ...s.alerts] })),
 
   activeDocId: null,
   setActiveDocId: (id) => set({ activeDocId: id }),
+
+  selectedDocIds: [],
+  toggleSelectedDoc: (id) =>
+    set((s) => ({
+      selectedDocIds: s.selectedDocIds.includes(id)
+        ? s.selectedDocIds.filter((d) => d !== id)
+        : [...s.selectedDocIds, id],
+    })),
+  setSelectedDocIds: (ids) => set({ selectedDocIds: ids }),
+  clearSelectedDocs: () => set({ selectedDocIds: [] }),
+
+  activeSource: null,
+  setActiveSource: (s) => set({ activeSource: s }),
 
   uploadProgress: {},
   setUploadProgress: (id, pct) =>

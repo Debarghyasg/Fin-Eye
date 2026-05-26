@@ -2,13 +2,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Send, Sparkles, BookOpen, ChevronDown, ChevronUp,
-  Copy, ThumbsUp, ThumbsDown, ExternalLink, Loader2,
+  Send, Sparkles, Copy, ThumbsUp, ThumbsDown, Loader2,
+  BookOpen, Filter, X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn, relativeTime, sleep } from "@/lib/utils";
 import { useAppStore, type QueryEntry } from "@/store/useAppStore";
-import { mockQueryHistory, mockDocuments } from "@/lib/mock-data";
+import { mockDocuments } from "@/lib/mock-data";
 
 const SUGGESTED = [
   "What was total revenue and YoY growth?",
@@ -28,34 +27,29 @@ function ConfidencePill({ score }: { score: number }) {
   );
 }
 
-function SourceChip({ docId, page, excerpt }: { docId: string; page: number; excerpt: string }) {
-  const doc = mockDocuments.find((d) => d.id === docId);
-  const [open, setOpen] = useState(false);
+/**
+ * Compact in-bubble badge that links to the SourcesPanel — kept so users
+ * still see "this answer cited 3 sources" inline. Clicking opens the source
+ * in the document viewer (same as clicking it in the right panel).
+ */
+function InlineSourceLinks({ entry }: { entry: QueryEntry }) {
+  const setActiveSource = useAppStore((s) => s.setActiveSource);
+  if (entry.sources.length === 0) return null;
   return (
-    <div className="text-xs">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-fin-500/10 border border-fin-500/20 text-fin-300 hover:bg-fin-500/20 transition-colors"
-      >
-        <BookOpen className="w-3 h-3" />
-        <span className="font-medium">{doc?.ticker ?? docId}</span>
-        <span className="text-muted-foreground">p.{page}</span>
-        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="mt-1 p-2 rounded-md bg-white/[0.04] border border-white/[0.07] text-muted-foreground italic">
-              "{excerpt}"
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="flex flex-wrap gap-1.5 px-1">
+      {entry.sources.map((s, i) => (
+        <button
+          key={`${s.docId}-${s.page}-${i}`}
+          onClick={() => setActiveSource({ docId: s.docId, page: s.page, excerpt: s.excerpt })}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-fin-500/10 border border-fin-500/20 text-fin-300 hover:bg-fin-500/20 transition-colors text-xs"
+        >
+          <BookOpen className="w-3 h-3" />
+          <span className="font-medium">
+            {mockDocuments.find((d) => d.id === s.docId)?.ticker ?? s.docId}
+          </span>
+          <span className="text-muted-foreground">p.{s.page}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -100,14 +94,7 @@ function QueryBubble({ entry }: { entry: QueryEntry }) {
             {renderAnswer(entry.answer)}
           </div>
 
-          {/* Sources */}
-          {entry.sources.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-1">
-              {entry.sources.map((s, i) => (
-                <SourceChip key={i} {...s} />
-              ))}
-            </div>
-          )}
+          <InlineSourceLinks entry={entry} />
 
           {/* Actions row */}
           <div className="flex items-center gap-2 px-1">
@@ -133,15 +120,97 @@ function QueryBubble({ entry }: { entry: QueryEntry }) {
 
 const MOCK_RESPONSES: Record<string, { answer: string; confidence: number }> = {
   default: {
-    answer: "Based on the indexed documents in your workspace, I found relevant information across **3 sources**. The query matches content in the financial statements and management discussion sections. For more precise results, try specifying a company ticker or fiscal period.",
+    answer:
+      "Based on the indexed documents in your workspace, I found relevant information across **3 sources**. The query matches content in the financial statements and management discussion sections. For more precise results, try specifying a company ticker or fiscal period.",
     confidence: 0.82,
   },
 };
 
+/**
+ * Build a mock response that respects the multi-select.
+ *
+ * When the user has selected specific docs, sources are sampled from those
+ * docs only — preserves the illusion that the query is scoped to the
+ * subset, matching what the live backend will do via document_ids on
+ * /api/v1/queries.
+ */
+function buildMockResponse(query: string, selectedDocIds: string[]): QueryEntry {
+  const pool = (selectedDocIds.length > 0 ? selectedDocIds : ["doc-1", "doc-3", "doc-5"]).slice(0, 3);
+  return {
+    id: `q-${Date.now()}`,
+    query,
+    answer: MOCK_RESPONSES.default.answer,
+    sources: pool.map((docId, i) => ({
+      docId,
+      page: Math.floor(Math.random() * 80) + 1,
+      excerpt:
+        i === 0
+          ? "Total net sales and operating metrics for the period under review demonstrated continued strength in services revenue."
+          : i === 1
+            ? "Management discussion and analysis indicates evolving macro headwinds and accelerated AI investment."
+            : "Risk factors section was updated to reflect new competitive pressures and supply concentration concerns.",
+    })),
+    confidence: MOCK_RESPONSES.default.confidence + (Math.random() * 0.1 - 0.05),
+    timestamp: new Date(),
+  };
+}
+
+/**
+ * SelectionBar shows what the next query will be scoped to.
+ * Sits at the top of the chat panel and is hidden when nothing is selected.
+ */
+function SelectionBar() {
+  const selectedDocIds = useAppStore((s) => s.selectedDocIds);
+  const documents = useAppStore((s) => s.documents);
+  const clearSelectedDocs = useAppStore((s) => s.clearSelectedDocs);
+  const toggleSelectedDoc = useAppStore((s) => s.toggleSelectedDoc);
+
+  if (selectedDocIds.length === 0) return null;
+  const selected = documents.filter((d) => selectedDocIds.includes(d.id));
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      className="border-b border-white/[0.07] bg-fin-500/5 overflow-hidden"
+    >
+      <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
+        <Filter className="w-3.5 h-3.5 text-fin-400 flex-shrink-0" />
+        <span className="text-xs text-fin-300 font-medium flex-shrink-0">
+          Querying {selected.length} doc{selected.length === 1 ? "" : "s"}:
+        </span>
+        <div className="flex flex-wrap gap-1 flex-1">
+          {selected.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => toggleSelectedDoc(d.id)}
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-fin-500/10 border border-fin-500/20 text-[11px] text-fin-300 hover:bg-fin-500/20 transition-colors"
+            >
+              {d.ticker} · {d.name.length > 24 ? d.name.slice(0, 24) + "…" : d.name}
+              <X className="w-2.5 h-2.5" />
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={clearSelectedDocs}
+          className="text-[11px] text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+        >
+          Clear
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 export function QueryPanel() {
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(true);
-  const { queryHistory, addQuery, isQuerying, setIsQuerying } = useAppStore();
+  const queryHistory = useAppStore((s) => s.queryHistory);
+  const addQuery = useAppStore((s) => s.addQuery);
+  const isQuerying = useAppStore((s) => s.isQuerying);
+  const setIsQuerying = useAppStore((s) => s.setIsQuerying);
+  const selectedDocIds = useAppStore((s) => s.selectedDocIds);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -157,19 +226,11 @@ export function QueryPanel() {
     setInput("");
     setShowSuggestions(false);
     setIsQuerying(true);
+
+    // TODO(phase4): when IS_LIVE_API, swap this for `submitQuery({ query, workspace_id, document_ids: selectedDocIds })`
     await sleep(1800 + Math.random() * 800);
-    const resp = MOCK_RESPONSES.default;
-    addQuery({
-      id: `q-${Date.now()}`,
-      query,
-      answer: resp.answer,
-      sources: [
-        { docId: "doc-1", page: Math.floor(Math.random() * 80) + 1, excerpt: "Total net sales and operating metrics…" },
-        { docId: "doc-3", page: Math.floor(Math.random() * 200) + 1, excerpt: "Management discussion and analysis…" },
-      ],
-      confidence: resp.confidence + (Math.random() * 0.1 - 0.05),
-      timestamp: new Date(),
-    });
+    addQuery(buildMockResponse(query, selectedDocIds));
+
     setIsQuerying(false);
   };
 
@@ -182,6 +243,8 @@ export function QueryPanel() {
 
   return (
     <div className="flex flex-col h-full">
+      <SelectionBar />
+
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
         {queryHistory.length === 0 && (
@@ -267,7 +330,11 @@ export function QueryPanel() {
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
             }}
             onKeyDown={handleKey}
-            placeholder="Ask a question across your documents… (⏎ to send)"
+            placeholder={
+              selectedDocIds.length > 0
+                ? `Ask across ${selectedDocIds.length} selected doc${selectedDocIds.length === 1 ? "" : "s"}…`
+                : "Ask a question across your documents… (⏎ to send)"
+            }
             className="flex-1 bg-transparent resize-none text-sm placeholder:text-muted-foreground focus:outline-none max-h-[120px] leading-relaxed py-1"
             style={{ height: "36px" }}
           />
