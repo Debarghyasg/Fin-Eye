@@ -12,6 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Robust pip — long timeout and many retries for flaky home networks
+ENV PIP_DEFAULT_TIMEOUT=600 \
+    PIP_RETRIES=10 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN pip install --upgrade pip
+
+# Install torch CPU-only first — ~190 MB vs ~750 MB for the default CUDA wheel.
+# requirements.txt still pins torch==2.3.1 below; pip sees it's already
+# installed and skips re-downloading it.
+RUN pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.3.1
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
