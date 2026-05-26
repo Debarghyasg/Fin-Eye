@@ -15,6 +15,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download spaCy model used by Presidio PII analyzer (~12 MB, en_core_web_sm).
+# Presidio falls back gracefully if the model is missing, but installing it
+# at build time is cheap and avoids a network call on first request.
+RUN python -m spacy download en_core_web_sm
+
 COPY . .
 
 # Non-root user for security

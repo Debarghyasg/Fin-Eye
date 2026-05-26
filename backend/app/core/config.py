@@ -120,6 +120,26 @@ class Settings(BaseSettings):
     DYNAMODB_AUDIT_TABLE: str = "finsight-query-audit"
     DYNAMODB_TTL_DAYS: int = 2555  # 7 years for SEC compliance (17a-4)
 
+    # ── Compliance: Fernet encryption at rest (PDF §10) ───────────────────────
+    # Generate a key once with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Then paste it into .env. If left blank in dev, encryption is disabled
+    # (raw bytes stored). In production a key MUST be set.
+    FERNET_KEY: str = ""
+    ENCRYPT_AT_REST: bool = True   # honoured only when FERNET_KEY is non-empty
+
+    # ── Compliance: Presidio PII scanner (PDF §0, §10) ────────────────────────
+    # When True (default), uses Microsoft Presidio + spaCy for 50+ entity types.
+    # On import failure (model missing, etc.) the service falls back to the
+    # built-in regex scanner so the upload pipeline never breaks.
+    USE_PRESIDIO: bool = True
+    PRESIDIO_LANGUAGE: str = "en"
+    PRESIDIO_MIN_SCORE: float = 0.5  # entities below this confidence are dropped
+    PRESIDIO_SPACY_MODEL: str = "en_core_web_sm"
+
+    # ── Compliance: audit log retention (SEC Rule 17a-4) ──────────────────────
+    AUDIT_LOG_RETENTION_YEARS: int = 7
+
     # ── AWS SES email (Phase 3 — alerts) ─────────────────────────────────────
     USE_SES: bool = False
     SES_FROM_ADDRESS: str = "alerts@finsight.local"

@@ -24,6 +24,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -533,3 +534,79 @@ class TickerSubscription(Base):
 
     def __repr__(self) -> str:
         return f"<TickerSubscription user={self.user_id!r} ticker={self.ticker!r} active={self.active}>"
+
+
+
+# ── audit_logs (SEC Rule 17a-4 append-only audit trail) ──────────────────────
+class AuditLog(Base):
+    """Append-only audit trail of every meaningful user action.
+
+    Distinct from :class:`QueryLog` (which captures RAG-specific Q/A pairs):
+    this table records *all* actions — UPLOAD, DOWNLOAD, DELETE, EXPORT,
+    LOGIN, COMPARE, ALERT_VIEW, etc. — across the platform.
+
+    Schema mirrors the production DynamoDB layout so the production migration
+    is a model swap, not a redesign:
+
+        partition key  → workspace_id
+        sort key       → created_at
+        GSI            → user_id
+
+    Records must never be UPDATEd or DELETEd. The ``expires_at`` column is a
+    *soft* TTL: a downstream cleanup job (Phase 5) will physically purge rows
+    past the SEC 17a-4 retention horizon. Until then this is an append-only
+    log even at the DB level (the migration revokes UPDATE/DELETE on the
+    application role).
+    """
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+
+    # Tenancy / actor
+    workspace_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # What happened
+    action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # Free-form but standard values: QUERY | UPLOAD | DOWNLOAD | DELETE |
+    # EXPORT | COMPARE | LOGIN | UPDATE | VIEW | ALERT_VIEW | ALERT_ACK
+    resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # document | query | workspace | comparison | alert | subscription | user
+    resource_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+    # Request context
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Free-form JSON for action-specific detail (filename, query_text, etc.).
+    # Maps to JSONB on PostgreSQL, JSON on SQLite (test).
+    audit_metadata: Mapped[Optional[dict]] = mapped_column(
+        "metadata", JSON, nullable=True,
+    )
+
+    # Time
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False, index=True
+    )
+    # Soft TTL — a Phase-5 cleanup job will purge rows past this timestamp.
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AuditLog id={self.id!r} action={self.action!r} "
+            f"resource={self.resource_type}/{self.resource_id!r}>"
+        )

@@ -173,6 +173,20 @@ def create_app() -> FastAPI:
     async def add_request_id(request: Request, call_next):  # type: ignore[return]
         import uuid
         request_id = str(uuid.uuid4())
+        # Stash on request.state so route handlers and the audit logger
+        # can correlate audit rows with HTTP requests via X-Request-ID.
+        request.state.request_id = request_id
+
+        # Pre-compute the originating client IP once so audit calls during
+        # the request don't re-parse X-Forwarded-For repeatedly.
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            request.state.client_ip = fwd.split(",")[0].strip() or None
+        elif request.client is not None:
+            request.state.client_ip = request.client.host
+        else:
+            request.state.client_ip = None
+
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
@@ -193,6 +207,7 @@ def create_app() -> FastAPI:
     from app.api.routes.analytics import router as analytics_router
     from app.api.routes.comparisons import router as comparisons_router
     from app.api.routes.alerts import router as alerts_router
+    from app.api.routes.audit import router as audit_router
 
     prefix = settings.API_V1_PREFIX
 
@@ -202,6 +217,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router,   prefix=prefix)
     app.include_router(comparisons_router, prefix=prefix)
     app.include_router(alerts_router,      prefix=prefix)
+    app.include_router(audit_router,       prefix=prefix)
 
     # ── Root ping (no auth — used by Docker healthcheck) ─────────────────────
     @app.get("/", include_in_schema=False)

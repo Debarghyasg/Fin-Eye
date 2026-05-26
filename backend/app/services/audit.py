@@ -208,3 +208,140 @@ async def _get_postgres_user_logs(
     """Get user logs from PostgreSQL."""
     # Placeholder - would implement actual DB query
     return []
+
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Generic action audit logger (PR 1 — SEC Rule 17a-4)
+# ════════════════════════════════════════════════════════════════════════════
+#  Distinct from the analytics-focused query auditing above:
+#  * write_comprehensive_audit_log() captures Q/A pairs in query_logs.
+#  * record_audit_event() (below) captures EVERY meaningful action (UPLOAD,
+#    DELETE, EXPORT, COMPARE, …) in the dedicated audit_logs table.
+#
+#  These two layers are intentionally separate. ``query_logs`` is optimised
+#  for RAG observability and analytics joins; ``audit_logs`` is optimised for
+#  compliance retrieval ("show me everything user X did between dates A and
+#  B") and mirrors a DynamoDB partition+sort layout for the production swap.
+# ════════════════════════════════════════════════════════════════════════════
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
+
+from fastapi import Request
+
+# Avoid circular imports at module load time.
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession  # noqa: F401  (re-import for type hints)
+
+
+def _get_request_id(request: Request | None) -> str | None:
+    """Extract the request id set by the X-Request-ID middleware in main.py."""
+    if request is None:
+        return None
+    return getattr(request.state, "request_id", None)
+
+
+def _get_client_ip(request: Request | None) -> str | None:
+    """Resolve the originating client IP, honouring X-Forwarded-For when present.
+
+    Order of precedence:
+      1. ``request.state.client_ip`` if set by an upstream middleware.
+      2. The first hop in ``X-Forwarded-For`` (typical reverse-proxy header).
+      3. ``request.client.host`` (direct connection).
+    """
+    if request is None:
+        return None
+
+    cached = getattr(request.state, "client_ip", None)
+    if cached:
+        return cached
+
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        # X-Forwarded-For: client, proxy1, proxy2 → take the first.
+        return fwd.split(",")[0].strip() or None
+
+    if request.client is not None:
+        return request.client.host
+
+    return None
+
+
+def _get_user_agent(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    ua = request.headers.get("user-agent")
+    return ua[:1024] if ua else None  # cap absurdly long UAs
+
+
+async def record_audit_event(
+    db: "AsyncSession",
+    *,
+    action: str,
+    resource_type: str,
+    resource_id: str | None = None,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+    request: Request | None = None,
+    status_code: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Insert an immutable row into ``audit_logs``.
+
+    Always called from inside a request handler that already holds an
+    ``AsyncSession``. The caller's transaction commit semantics are honoured —
+    we ``flush`` here to fail fast if the row is invalid, but never commit so
+    that the audit row is rolled back together with the underlying business
+    operation if the latter fails.
+
+    Parameters
+    ----------
+    action
+        Verb describing what happened. Convention: UPPER_SNAKE. Standard
+        values: ``QUERY``, ``UPLOAD``, ``DOWNLOAD``, ``DELETE``, ``UPDATE``,
+        ``EXPORT``, ``COMPARE``, ``LOGIN``, ``ALERT_VIEW``, ``ALERT_ACK``.
+    resource_type
+        Lowercase entity name. Standard values: ``document``, ``query``,
+        ``workspace``, ``comparison``, ``alert``, ``subscription``, ``user``.
+    metadata
+        Free-form JSON payload — serialised to JSONB on Postgres. Use this
+        for action-specific fields like ``{"filename": ..., "size": ...}``
+        that don't deserve a dedicated column.
+
+    Returns
+    -------
+    str
+        The id of the inserted audit row, useful for trace correlation.
+    """
+    # Local imports avoid the circular `audit.py → models → audit.py` cycle that
+    # would arise if we imported AuditLog at module top.
+    from datetime import datetime, timezone
+
+    from app.core.config import settings
+    from app.db.models import AuditLog
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=365 * settings.AUDIT_LOG_RETENTION_YEARS)
+
+    row = AuditLog(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        ip_address=_get_client_ip(request),
+        user_agent=_get_user_agent(request),
+        request_id=_get_request_id(request),
+        status_code=status_code,
+        audit_metadata=metadata,
+        created_at=now,
+        expires_at=expires_at,
+    )
+    db.add(row)
+    await db.flush()  # surface FK / NOT-NULL violations immediately
+
+    log.debug(
+        "audit_event recorded id=%s action=%s resource=%s/%s user=%s ws=%s",
+        row.id, action, resource_type, resource_id, user_id, workspace_id,
+    )
+    return row.id
