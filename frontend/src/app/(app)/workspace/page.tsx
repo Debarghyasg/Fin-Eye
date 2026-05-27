@@ -14,10 +14,18 @@
  * sets `activeSource` which the next commit's <DocumentViewer /> dialog
  * consumes to open the PDF on the right page with the excerpt
  * highlighted.
+ *
+ * In live mode (NEXT_PUBLIC_API_URL set), the document list and query
+ * history are seeded from the backend on mount; subsequent
+ * uploads/queries mutate the same store so the UI stays in sync without
+ * a refetch on every keystroke.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Search, CheckSquare, Square, Filter } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
+
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,14 +33,141 @@ import { UploadZone } from "@/components/workspace/UploadZone";
 import { DocumentCard } from "@/components/workspace/DocumentCard";
 import { QueryPanel } from "@/components/workspace/QueryPanel";
 import { SourcesPanel } from "@/components/workspace/SourcesPanel";
-import { useAppStore } from "@/store/useAppStore";
+import { useAppStore, type Document, type QueryEntry } from "@/store/useAppStore";
+import { useWorkspaceId } from "@/lib/use-workspace";
+import { IS_LIVE_API } from "@/lib/api/client";
+import {
+  listDocuments,
+  type DocumentOut,
+  type DocumentStatus,
+} from "@/lib/api/documents";
+import { getQueryHistory, type QueryHistoryItem } from "@/lib/api/queries";
 import { cn } from "@/lib/utils";
+
+/**
+ * Map the backend's ``DocumentOut`` (snake_case, raw enum values) to the
+ * Zustand store's ``Document`` shape (camelCase, UI-friendly labels). Keeps
+ * every consumer of the store unchanged — DocumentCard, SourcesPanel, etc.
+ * all keep working.
+ */
+function adaptDocument(d: DocumentOut): Document {
+  const typeLabel: Document["type"] =
+    d.doc_type === "10-K"
+      ? "10-K"
+      : d.doc_type === "10-Q"
+        ? "10-Q"
+        : d.doc_type === "earnings_call"
+          ? "Earnings Call"
+          : d.doc_type === "annual_report"
+            ? "Annual Report"
+            : d.doc_type === "prospectus"
+              ? "Prospectus"
+              : "Other";
+
+  const uiStatus: Document["status"] =
+    d.status === "indexed"
+      ? "indexed"
+      : d.status === "failed"
+        ? ("failed" as Document["status"])
+        : "processing";
+
+  return {
+    id: d.id,
+    name: d.original_filename,
+    type: typeLabel,
+    company: d.company_name ?? "—",
+    ticker: d.ticker ?? "—",
+    size: d.file_size_bytes,
+    pages: d.page_count ?? 0,
+    chunkCount: 0, // populated by the upload poller; full count needs /chunks
+    uploadedAt: new Date(d.created_at),
+    status: uiStatus,
+    tags: [d.fiscal_period ?? "uploaded"].filter(Boolean) as string[],
+    confidence: d.avg_confidence ?? 0,
+    processingProgress: uiStatus === "indexed" ? 100 : 50,
+  } as Document;
+}
+
+/**
+ * Map ``QueryHistoryItem`` (one Postgres row) to the store's ``QueryEntry``
+ * shape used by QueryPanel / SourcesPanel.
+ */
+function adaptQueryHistoryItem(h: QueryHistoryItem): QueryEntry {
+  // source_chunk_ids/source_doc_ids are JSON-encoded strings — best-effort
+  // parse, ignore malformed entries (older rows may pre-date the encoding).
+  let chunkIds: string[] = [];
+  let docIds: string[] = [];
+  try {
+    if (h.source_chunk_ids) chunkIds = JSON.parse(h.source_chunk_ids);
+  } catch {}
+  try {
+    if (h.source_doc_ids) docIds = JSON.parse(h.source_doc_ids);
+  } catch {}
+
+  return {
+    id: h.id,
+    query: h.query_text,
+    answer: h.answer_text ?? "",
+    sources: docIds.slice(0, 5).map((docId, i) => ({
+      docId,
+      page: 1,
+      excerpt: chunkIds[i] ? `Chunk ${chunkIds[i].slice(0, 8)}…` : "",
+    })),
+    confidence: h.confidence_score ?? 0,
+    timestamp: new Date(h.created_at),
+  } as QueryEntry;
+}
 
 export default function WorkspacePage() {
   const documents = useAppStore((s) => s.documents);
   const selectedDocIds = useAppStore((s) => s.selectedDocIds);
   const setSelectedDocIds = useAppStore((s) => s.setSelectedDocIds);
   const clearSelectedDocs = useAppStore((s) => s.clearSelectedDocs);
+
+  // ── Live-mode hydration ─────────────────────────────────────────────
+  // Pull the user's documents and query history from the backend so the
+  // UI doesn't show only the in-memory items added during this session.
+  const { getToken, isSignedIn } = useAuth();
+  const workspaceId = useWorkspaceId();
+  const liveReady = IS_LIVE_API && !!isSignedIn && !!workspaceId;
+
+  const docsQuery = useQuery({
+    queryKey: ["documents", workspaceId],
+    queryFn: () => listDocuments(workspaceId!, { page_size: 100 }, getToken),
+    enabled: liveReady,
+    staleTime: 30_000,
+  });
+
+  const historyQuery = useQuery({
+    queryKey: ["query-history", workspaceId],
+    queryFn: () => getQueryHistory(workspaceId!, { page_size: 20 }, getToken),
+    enabled: liveReady,
+    staleTime: 30_000,
+  });
+
+  // Hydrate the Zustand store from the React Query caches. We only do
+  // this when fresh server data arrives — this means in-flight uploads
+  // and queries that mutate the store directly are preserved between
+  // server fetches (the store is the single source of truth for the UI).
+  useEffect(() => {
+    if (!liveReady) return;
+    if (!docsQuery.data) return;
+    const adapted = docsQuery.data.items.map(adaptDocument);
+    // Preserve any in-flight uploads (status === "processing" with a
+    // non-server ID) that the server hasn't yet returned.
+    const serverIds = new Set(adapted.map((d) => d.id));
+    const inFlight = useAppStore
+      .getState()
+      .documents.filter((d) => !serverIds.has(d.id) && d.status !== "indexed");
+    useAppStore.setState({ documents: [...inFlight, ...adapted] });
+  }, [liveReady, docsQuery.data]);
+
+  useEffect(() => {
+    if (!liveReady) return;
+    if (!historyQuery.data) return;
+    const adapted = historyQuery.data.items.map(adaptQueryHistoryItem);
+    useAppStore.setState({ queryHistory: adapted });
+  }, [liveReady, historyQuery.data]);
 
   const [search, setSearch] = useState("");
   const [showUpload, setShowUpload] = useState(false);
@@ -71,9 +206,11 @@ export default function WorkspacePage() {
       <Header
         title="Document Workspace"
         subtitle={
-          processingCount > 0
-            ? `${indexedCount} indexed · ${processingCount} processing · RAG pipeline active`
-            : `${indexedCount} documents indexed · RAG pipeline active`
+          liveReady && docsQuery.isLoading
+            ? "Loading documents from backend…"
+            : processingCount > 0
+              ? `${indexedCount} indexed · ${processingCount} processing · RAG pipeline active`
+              : `${indexedCount} documents indexed · RAG pipeline active`
         }
       />
 
