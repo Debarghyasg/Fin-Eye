@@ -8,7 +8,8 @@ import { useAuth } from "@clerk/nextjs";
 import { cn, formatBytes } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { useAppStore } from "@/store/useAppStore";
-import { IS_LIVE_API, apiFetch } from "@/lib/api/client";
+import { IS_LIVE_API } from "@/lib/api/client";
+import { useWorkspaceId } from "@/lib/use-workspace";
 import {
   uploadDocument,
   getDocumentStatus,
@@ -40,32 +41,6 @@ const STATUS_PCT: Record<DocumentStatus, number> = {
   failed: 0,
 };
 
-/**
- * Resolve a workspace UUID to attach to the upload. Tries:
- *   1. NEXT_PUBLIC_DEFAULT_WORKSPACE_ID (explicit override)
- *   2. The first workspace returned by GET /auth/me/workspaces
- *
- * The backend auto-creates a default workspace on first sign-in, so this
- * second path is the normal one for fresh accounts.
- */
-async function resolveWorkspaceId(
-  getToken: () => Promise<string | null>
-): Promise<string> {
-  const fromEnv = process.env.NEXT_PUBLIC_DEFAULT_WORKSPACE_ID;
-  if (fromEnv && fromEnv.length > 0) return fromEnv;
-
-  const list = await apiFetch<Array<{ id: string; name: string }>>(
-    "/auth/me/workspaces",
-    { getToken }
-  );
-  if (!list || list.length === 0) {
-    throw new Error(
-      "No workspace found for current user. Sign out and sign back in to bootstrap one."
-    );
-  }
-  return list[0].id;
-}
-
 export function UploadZone() {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const addDocument = useAppStore((s) => s.addDocument);
@@ -74,6 +49,11 @@ export function UploadZone() {
   // Clerk hooks. When IS_LIVE_API is false we never call getToken, so
   // the offline-friendly mock mode keeps working without sign-in.
   const { getToken, isSignedIn } = useAuth();
+
+  // Shared workspace resolver — handles env override and /auth/me/workspaces
+  // fallback behind a single React Query cache so every page agrees on
+  // the current workspace ID.
+  const workspaceId = useWorkspaceId();
 
   // Track per-document polling intervals so we can clean up on unmount.
   const pollersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -140,7 +120,11 @@ export function UploadZone() {
   const realUpload = useCallback(
     async (uploadId: string, file: File) => {
       try {
-        const workspaceId = await resolveWorkspaceId(getToken);
+        if (!workspaceId) {
+          throw new Error(
+            "No workspace found for current user. Sign out and sign back in to bootstrap one."
+          );
+        }
 
         // 1) Multipart upload with browser progress events.
         const resp = await uploadDocument({
@@ -239,7 +223,7 @@ export function UploadZone() {
         );
       }
     },
-    [getToken, addDocument, updateDocument]
+    [getToken, addDocument, updateDocument, workspaceId]
   );
 
   const onDrop = useCallback(
@@ -253,14 +237,14 @@ export function UploadZone() {
       setFiles((prev) => [...prev, ...newFiles]);
 
       newFiles.forEach((f) => {
-        if (IS_LIVE_API && isSignedIn) {
+        if (IS_LIVE_API && isSignedIn && workspaceId) {
           void realUpload(f.id, f.file);
         } else {
           simulate(f.id, f.file);
         }
       });
     },
-    [simulate, realUpload, isSignedIn]
+    [simulate, realUpload, isSignedIn, workspaceId]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

@@ -52,9 +52,7 @@ import {
 import { mockAlerts, mockSubscriptions } from "@/lib/mock-data";
 import { cn, relativeTime } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
-
-const DEFAULT_WORKSPACE_ID =
-  process.env.NEXT_PUBLIC_DEFAULT_WORKSPACE_ID ?? "default";
+import { useWorkspaceId } from "@/lib/use-workspace";
 
 /* ── Visual config ─────────────────────────────────────────────────────── */
 const alertConfig: Record<
@@ -351,6 +349,14 @@ function StatPill({
 export default function AlertsPage() {
   const queryClient = useQueryClient();
 
+  // Resolve the user's real workspace UUID once and share with every
+  // call below (including SubscribeTickerDialog). Falls back to "default"
+  // for the mock-mode subscription seed; live mutations short-circuit
+  // until a real ID is available so we never POST against the literal
+  // string "default".
+  const workspaceId = useWorkspaceId();
+  const effectiveWorkspaceId = workspaceId ?? "default";
+
   // ── Mock-mode state (used when IS_LIVE_API is false) ──────────────────
   const mockStoreAlerts = useAppStore((s) => s.alerts);
   const mockMarkRead = useAppStore((s) => s.markAlertRead);
@@ -360,7 +366,7 @@ export default function AlertsPage() {
     mockSubscriptions.map((s, i) => ({
       id: `mock-sub-${i}`,
       user_id: "demo-user",
-      workspace_id: DEFAULT_WORKSPACE_ID,
+      workspace_id: effectiveWorkspaceId,
       ticker: s.ticker,
       company_name: s.company,
       subscribe_anomaly: s.anomaly,
@@ -739,7 +745,7 @@ export default function AlertsPage() {
       <SubscribeTickerDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        workspaceId={DEFAULT_WORKSPACE_ID}
+        workspaceId={effectiveWorkspaceId}
         onCreate={handleSubCreated}
       />
     </div>

@@ -47,9 +47,7 @@ import {
   mockTokenUsage,
 } from "@/lib/mock-data";
 import { cn, formatNumber } from "@/lib/utils";
-
-const DEFAULT_WORKSPACE_ID =
-  process.env.NEXT_PUBLIC_DEFAULT_WORKSPACE_ID ?? "default";
+import { useWorkspaceId } from "@/lib/use-workspace";
 
 /* ── Chart tooltips ───────────────────────────────────────────────────── */
 function ChartTooltip({ active, payload, label, suffix = "" }: any) {
@@ -75,11 +73,16 @@ function ChartTooltip({ active, payload, label, suffix = "" }: any) {
 
 /* ── Page ─────────────────────────────────────────────────────────────── */
 export default function AnalyticsPage() {
+  // Resolve the real workspace UUID. Live calls are gated on this so we
+  // never hit the backend with the literal string "default".
+  const workspaceId = useWorkspaceId();
+
   // Live audit aggregates — only fired when an API URL is configured
+  // AND we have a real workspace_id resolved.
   const { data: live, isLoading: liveLoading, error: liveError } = useQuery<WorkspaceAnalytics>({
-    queryKey: ["audit-analytics", DEFAULT_WORKSPACE_ID, 30],
-    queryFn: () => getWorkspaceAuditAnalytics(DEFAULT_WORKSPACE_ID, 30),
-    enabled: IS_LIVE_API,
+    queryKey: ["audit-analytics", workspaceId, 30],
+    queryFn: () => getWorkspaceAuditAnalytics(workspaceId!, 30),
+    enabled: IS_LIVE_API && !!workspaceId,
     staleTime: 5 * 60_000,
   });
 
@@ -160,11 +163,11 @@ export default function AnalyticsPage() {
                 </span>
               ) : liveLoading ? (
                 <span className="text-emerald-300">
-                  Live · loading aggregates from /analytics/audit/workspace/{DEFAULT_WORKSPACE_ID}…
+                  Live · loading aggregates from /analytics/audit/workspace/{workspaceId ?? "…"}…
                 </span>
               ) : (
                 <span className="text-emerald-300">
-                  Live · aggregate stats from /analytics/audit/workspace/{DEFAULT_WORKSPACE_ID} (period: {live?.period_days ?? 30}d).
+                  Live · aggregate stats from /analytics/audit/workspace/{workspaceId ?? "?"} (period: {live?.period_days ?? 30}d).
                   Per-day time series remain mock until the analytics endpoint
                   buckets by day.
                 </span>

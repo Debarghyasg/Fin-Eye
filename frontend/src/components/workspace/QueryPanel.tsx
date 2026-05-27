@@ -5,9 +5,13 @@ import {
   Send, Sparkles, Copy, ThumbsUp, ThumbsDown, Loader2,
   BookOpen, Filter, X,
 } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
+
 import { cn, relativeTime, sleep } from "@/lib/utils";
 import { useAppStore, type QueryEntry } from "@/store/useAppStore";
-import { mockDocuments } from "@/lib/mock-data";
+import { useWorkspaceId } from "@/lib/use-workspace";
+import { IS_LIVE_API } from "@/lib/api/client";
+import { submitQuery, type QueryResponse } from "@/lib/api/queries";
 
 const SUGGESTED = [
   "What was total revenue and YoY growth?",
@@ -34,24 +38,51 @@ function ConfidencePill({ score }: { score: number }) {
  */
 function InlineSourceLinks({ entry }: { entry: QueryEntry }) {
   const setActiveSource = useAppStore((s) => s.setActiveSource);
+  // Resolve ticker/name from the live store so live-mode citations
+  // surface real labels (the previous mockDocuments lookup mismatched
+  // every real UUID and showed the raw ID instead).
+  const documents = useAppStore((s) => s.documents);
   if (entry.sources.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5 px-1">
-      {entry.sources.map((s, i) => (
-        <button
-          key={`${s.docId}-${s.page}-${i}`}
-          onClick={() => setActiveSource({ docId: s.docId, page: s.page, excerpt: s.excerpt })}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-fin-500/10 border border-fin-500/20 text-fin-300 hover:bg-fin-500/20 transition-colors text-xs"
-        >
-          <BookOpen className="w-3 h-3" />
-          <span className="font-medium">
-            {mockDocuments.find((d) => d.id === s.docId)?.ticker ?? s.docId}
-          </span>
-          <span className="text-muted-foreground">p.{s.page}</span>
-        </button>
-      ))}
+      {entry.sources.map((s, i) => {
+        const doc = documents.find((d) => d.id === s.docId);
+        const label = doc?.ticker ?? doc?.name?.slice(0, 18) ?? s.docId.slice(0, 8);
+        return (
+          <button
+            key={`${s.docId}-${s.page}-${i}`}
+            onClick={() => setActiveSource({ docId: s.docId, page: s.page, excerpt: s.excerpt })}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-fin-500/10 border border-fin-500/20 text-fin-300 hover:bg-fin-500/20 transition-colors text-xs"
+          >
+            <BookOpen className="w-3 h-3" />
+            <span className="font-medium">{label}</span>
+            <span className="text-muted-foreground">p.{s.page}</span>
+          </button>
+        );
+      })}
     </div>
   );
+}
+
+/**
+ * Adapt the backend's QueryResponse to the Zustand store's QueryEntry
+ * shape. The store keeps a flatter `sources` representation that the
+ * SourcesPanel and InlineSourceLinks both consume — keeping that shape
+ * stable means we don't have to touch every consumer.
+ */
+function adaptQueryResponse(r: QueryResponse): QueryEntry {
+  return {
+    id: r.query_log_id,
+    query: r.query,
+    answer: r.answer,
+    confidence: r.confidence,
+    sources: r.sources.map((s) => ({
+      docId: s.document_id,
+      page: s.page_number ?? 1,
+      excerpt: s.excerpt,
+    })),
+    timestamp: new Date(),
+  } as QueryEntry;
 }
 
 function QueryBubble({ entry }: { entry: QueryEntry }) {
@@ -214,6 +245,11 @@ export function QueryPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Live-mode plumbing: workspace_id + Clerk JWT.
+  const { getToken, isSignedIn } = useAuth();
+  const workspaceId = useWorkspaceId();
+  const liveReady = IS_LIVE_API && !!isSignedIn && !!workspaceId;
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -227,11 +263,42 @@ export function QueryPanel() {
     setShowSuggestions(false);
     setIsQuerying(true);
 
-    // TODO(phase4): when IS_LIVE_API, swap this for `submitQuery({ query, workspace_id, document_ids: selectedDocIds })`
-    await sleep(1800 + Math.random() * 800);
-    addQuery(buildMockResponse(query, selectedDocIds));
-
-    setIsQuerying(false);
+    try {
+      if (liveReady) {
+        // Real RAG path: hit FastAPI, parse citations, push into store.
+        const resp = await submitQuery(
+          {
+            query,
+            workspace_id: workspaceId!,
+            // When the user has selected specific docs, scope the retrieval;
+            // empty array → backend retrieves across the whole workspace.
+            document_ids: selectedDocIds.length ? selectedDocIds : undefined,
+          },
+          getToken
+        );
+        addQuery(adaptQueryResponse(resp));
+      } else {
+        // Offline/mocks: keep the demo behaviour for designers.
+        await sleep(1800 + Math.random() * 800);
+        addQuery(buildMockResponse(query, selectedDocIds));
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[query] submit failed", err);
+      // Render a visible failure bubble so the user sees the error rather
+      // than thinking the request silently dropped.
+      addQuery({
+        id: `q-err-${Date.now()}`,
+        query,
+        answer:
+          "**Query failed.** The backend rejected the request — check the browser network tab and the API logs. Common causes: not signed in, no documents indexed yet, or the LLM provider is temporarily unavailable.",
+        sources: [],
+        confidence: 0,
+        timestamp: new Date(),
+      } as QueryEntry);
+    } finally {
+      setIsQuerying(false);
+    }
   };
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
