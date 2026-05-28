@@ -6,10 +6,11 @@
     <img alt="Next.js"    src="https://img.shields.io/badge/Next.js-15.3-000000?style=flat&logo=next.js" />
     <img alt="FastAPI"    src="https://img.shields.io/badge/FastAPI-0.111-009688?style=flat&logo=fastapi" />
     <img alt="Postgres"   src="https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql" />
-    <img alt="ChromaDB"   src="https://img.shields.io/badge/ChromaDB-0.5-FF6B6B?style=flat" />
+    <img alt="Qdrant"     src="https://img.shields.io/badge/Qdrant-1.12-FF6B6B?style=flat" />
     <img alt="Groq"       src="https://img.shields.io/badge/Groq-Llama_3.1_70B-F97316?style=flat" />
     <img alt="Coverage"   src="https://img.shields.io/badge/coverage-%E2%89%A570%25-22c55e?style=flat" />
     <img alt="Cost"       src="https://img.shields.io/badge/Cost-%240%2Fmonth-22c55e?style=flat" />
+    <img alt="Windows"    src="https://img.shields.io/badge/Windows_11-no_Docker-0078D4?style=flat&logo=windows" />
   </p>
 </div>
 
@@ -58,7 +59,7 @@ Fin-Sight is a multi-tenant RAG platform with four user-facing capabilities:
 3. **Anomaly alerts** — every new filing's metrics are written to a per-ticker time series; values that fall more than 2σ outside the historical mean fire an alert with severity tied to |z|.
 4. **Proactive SEC filing watch** — a background poller checks SEC EDGAR for new filings against the user's watchlist and pushes alerts (in-app + email).
 
-It's a working web app: Next.js front-end, FastAPI back-end, PostgreSQL for metadata and audit, ChromaDB for vectors, Redis for the BM25 index, all wired together by Docker Compose. Auth is Clerk. The LLM is Llama 3.1 70B served through Groq. Every embedding runs locally on CPU.
+It's a working web app: Next.js front-end, FastAPI back-end, PostgreSQL for metadata and audit, Qdrant for hybrid vector search, Redis for caching — all running natively on Windows 11 without Docker. Auth is Clerk. The LLM is Llama 3.1 70B served through Groq. Every embedding runs locally on CPU.
 
 Total runtime cost in dev: $0. Total runtime cost in production at 1,000 users: about $410/month — **48× cheaper** than the equivalent paid stack (see [§6](#6-cost-analysis-at-1000-users)).
 
@@ -173,11 +174,13 @@ The trade-off is latency: cross-encoders are too slow to run on a whole corpus, 
 
 The choice has knock-on effects: vectors are 384-dim instead of 1,536-dim, so ChromaDB storage drops by 4×, and dot-product computations are faster.
 
-### 4.4 ChromaDB instead of Pinecone
+### 4.4 Qdrant instead of ChromaDB / Pinecone
 
-Pinecone was the obvious choice when I started — it's the de-facto serverless vector DB. I rejected it for three reasons: it has a credit-card barrier (the "free" tier is time-limited), I did not want to push customer data through a third-party for a project that could just as well run on a laptop, and ChromaDB ships as a Docker image with a persistent volume, which fits the "$0/mo, runs on a laptop" constraint exactly.
+Pinecone was the obvious choice when I started — it's the de-facto serverless vector DB. I rejected it for three reasons: it has a credit-card barrier (the "free" tier is time-limited), I did not want to push customer data through a third-party for a project that could just as well run on a laptop, and Qdrant ships as a single self-contained executable that starts in under a second with no configuration.
 
-The internal API is a thin wrapper, so swapping back to Pinecone is roughly a 50-line patch in `embedder.py` and `retriever.py`. I treat the swap as a future-tense decision driven by scale, not a present-tense one.
+Compared to ChromaDB, Qdrant's key advantage is **native hybrid search** — dense + BM25 sparse vectors in the same collection, queried in one round-trip with server-side Reciprocal Rank Fusion. ChromaDB requires a separate BM25 layer (previously Redis-cached), which adds a service to the architecture. Qdrant eliminates that entirely.
+
+The internal API is a thin wrapper, so swapping to Pinecone Serverless in production is roughly a 30-line patch — change `QDRANT_URL` and `QDRANT_API_KEY` to point at a Pinecone host. No business logic moves.
 
 ### 4.5 Groq + Llama 3.1 70B for the LLM
 
@@ -199,9 +202,11 @@ This mattered in evaluation: pre-change, ~30% of metric questions cited a chunk 
 
 Document metadata, chunks, audit log, alerts, ticker subscriptions, comparison results — all in Postgres. The audit log alone is justification: SEC Rule 17a-4 requires a 7-year retention of business records in non-erasable, non-rewritable storage. PostgreSQL with row-level append-only patterns and the right backup story (point-in-time recovery, immutable S3 backups) maps to that requirement. DynamoDB is wired in as a *second* audit destination for projects that want write-once-read-many semantics natively, but it's optional.
 
-### 4.8 FastAPI BackgroundTasks instead of SQS for the worker
+### 4.8 Celery ALWAYS_EAGER instead of a separate worker process for local dev
 
-The document pipeline (extract → chunk → embed → index) runs as a `BackgroundTasks` job in the same process that received the upload. SQS is wired in (`USE_SQS=true`) but defaults to off. This is a deliberate tradeoff: it keeps the local-dev experience to a single `docker-compose up`, and at the project's scale (single-tenant analyst, 1k users at most) BackgroundTasks holds up fine. Migration to SQS or a dedicated worker is a flag flip plus a small Lambda — the boundary already exists in the code.
+The document pipeline (extract → chunk → embed → index) runs as a Celery task. In local development `CELERY_TASK_ALWAYS_EAGER=true` makes Celery execute tasks synchronously inline — no RabbitMQ, no separate worker process, no extra terminal window needed. An upload simply blocks until the document is fully indexed (~5–30 s per PDF).
+
+For production or advanced local testing, set `CELERY_TASK_ALWAYS_EAGER=false` and start a Celery worker. This gives you retries, dead-letter queues, and the ability to scale uploads independently of API traffic. The boundary already exists in the code — it's a one-line `.env` change.
 
 ### 4.9 Z-score anomaly detection rather than a fancy ML model
 
@@ -217,7 +222,7 @@ The generation prompt is uncompromising: *"Answer ONLY using the numbered source
 
 ## 5. Performance benchmarks
 
-These are measured on a developer laptop (Apple M1 Pro, 16 GB) running the full Docker Compose stack against synthetic but realistic 10-K-style documents. CPU-bound numbers are roughly representative of an `m6a.large` EC2 instance.
+These are measured on a developer laptop (Apple M1 Pro, 16 GB) running the full stack natively against synthetic but realistic 10-K-style documents. CPU-bound numbers are roughly representative of an `m6a.large` EC2 instance.
 
 ### 5.1 Query latency
 
@@ -362,11 +367,9 @@ I built a hand-graded evaluation set of ~200 Q&A pairs in week 8 to compare mode
 
 If I started over I would build the eval set first, treat it as the spec, and let it dictate the rest of the architecture. This is the single highest-leverage change I could have made.
 
-### 8.2 I would lean into pgvector instead of bringing in ChromaDB
+### 8.2 I would lean into pgvector instead of bringing in Qdrant
 
-ChromaDB does its job, but it adds a service to the architecture. PostgreSQL with the `pgvector` extension can hold the same vectors, the same metadata, and the same workspace partitioning — and the same database is already there for chunks, audit, and metrics. One fewer service to monitor, one fewer connection pool to manage, one fewer deploy step. The downside is that pgvector's HNSW index is younger than ChromaDB's, but for a 30M-vector workload it's well within the supported envelope.
-
-I'd write that migration as the first thing I do post-blog.
+Qdrant does its job well, but it adds a service to the architecture. PostgreSQL with the `pgvector` extension can hold the same vectors, the same metadata, and the same workspace partitioning — and the same database is already there for chunks, audit, and metrics. One fewer service to run, one fewer connection pool to manage. The downside is that pgvector's HNSW index is younger and doesn't yet support native hybrid search in one query the way Qdrant does. For a 30M-vector workload it's well within the supported envelope, but losing server-side RRF fusion would require client-side merging again.
 
 ### 8.3 The reranker is a candidate to drop, not to optimise
 
@@ -380,7 +383,7 @@ The current chunker is tuned generically: 800 chars, 150 overlap. It works, but 
 
 ### 8.5 Ship the worker as a real worker
 
-The document pipeline currently runs as a FastAPI `BackgroundTasks` job in the API process. That is fine for development and for the project's current scale, but it has obvious failure modes: if the API container is OOM-killed mid-extraction, the document is stuck in `EXTRACTING` forever. A real worker (Celery, RQ, or a Lambda triggered by SQS) gives me retries, dead-letter queues, and the ability to scale uploads independently of API traffic. The hooks are already in place — I'd flip `USE_SQS=true` and write a 30-line consumer.
+With `CELERY_TASK_ALWAYS_EAGER=true` (the local default) document processing runs inline and synchronously — perfectly fine for development. In production `ALWAYS_EAGER=false` routes tasks to a real Celery worker via RabbitMQ, which gives retries, dead-letter queues, and independent scaling. The hooks are already in place — it's a one-line env change. What's missing is the operational story: health checks on the worker process, alerting on a stuck queue, and a proper dead-letter handler that flips the document to `FAILED` when all retries are exhausted.
 
 ### 8.6 I'd treat the alerting pipeline as a product, not a feature
 
@@ -396,57 +399,89 @@ I have structured logs (`structlog` JSON output) and a per-stage health endpoint
 
 ---
 
-## 9. Quick start
+## 9. Quick start (Windows 11 — no Docker required)
 
-### Prerequisites
+> Full step-by-step guide with troubleshooting: **[local_dev_windows.md](local_dev_windows.md)**
 
-- Docker Desktop with Compose v2
-- Node.js 20+ for the front-end
-- A free [Clerk](https://clerk.com) account
-- A free [Groq](https://console.groq.com) API key
+### Prerequisites — install once
+
+| Tool | Download | Notes |
+|------|----------|-------|
+| Python 3.11 | https://python.org/downloads | ✅ tick **"Add to PATH"** during install |
+| Node.js 20 LTS | https://nodejs.org | All defaults |
+| PostgreSQL 16 | https://www.enterprisedb.com/downloads/postgres-postgresql-downloads | Set password to `finsight_dev` |
+| Qdrant | https://github.com/qdrant/qdrant/releases — download `qdrant-x86_64-pc-windows-msvc.zip` | Extract to `C:\qdrant\` |
+| Redis | https://github.com/microsoftarchive/redis/releases — `Redis-x64-3.0.504.msi` | Tick "Add to PATH" |
 
 ### 1 — Clone and configure
 
+Open **Git Bash** and run:
+
 ```bash
 git clone https://github.com/Debarghyasg/Fin-Eye.git
-cd Fin-Eye
-cp backend/.env.example backend/.env
+cd Fin-Eye/backend
+cp .env.example .env
 ```
 
-Open `backend/.env` and set the three required keys:
+Open `backend/.env` and fill in the three required values:
 
 ```env
-CLERK_SECRET_KEY=sk_test_...
+CLERK_SECRET_KEY=sk_test_...       # from https://dashboard.clerk.com → API Keys
 CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_JWT_AUDIENCE=https://your-app.clerk.accounts.dev
-GROQ_API_KEY=gsk_...
+GROQ_API_KEY=gsk_...               # free at https://console.groq.com
 ```
 
-Everything else has working defaults for local Docker dev.
+Everything else works with the defaults already in `.env.example`.
 
-### 2 — Boot the stack
+### 2 — Set up the backend
 
 ```bash
-docker-compose up
+# Still in backend/
+python -m venv .venv
+source .venv/Scripts/activate
+
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+
+# Create the database (run once)
+psql -U postgres -h localhost -c "CREATE USER finsight WITH PASSWORD 'finsight_dev';"
+psql -U postgres -h localhost -c "CREATE DATABASE finsight OWNER finsight;"
+
+alembic upgrade head
 ```
 
-This starts PostgreSQL 16 (auto-migrated), Redis, ChromaDB (with persistent volume), and the FastAPI app on port 8000. Verify:
+### 3 — Set up the frontend
 
+```bash
+cd ../frontend
+npm install
+```
+
+Create `frontend/.env.local`:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+```
+
+### 4 — Start everything (4 terminals)
+
+| Terminal | Command |
+|----------|---------|
+| **1** — Qdrant | `cd C:\qdrant && .\qdrant.exe` |
+| **2** — Redis | `redis-server` |
+| **3** — Backend | `cd Fin-Eye/backend && source .venv/Scripts/activate && uvicorn app.main:app --reload --port 8000` |
+| **4** — Frontend | `cd Fin-Eye/frontend && npm run dev` |
+
+Open **http://localhost:3000**, sign up, upload a 10-K, and ask a question.
+
+Verify the backend is healthy:
 ```bash
 curl http://localhost:8000/api/v1/analytics/health
 ```
 
-Interactive API docs: <http://localhost:8000/docs>.
-
-### 3 — Run the front-end
-
-```bash
-cd frontend
-npm install --legacy-peer-deps
-npm run dev
-```
-
-Open <http://localhost:3000>, sign in, upload a 10-K, and ask a question.
+Interactive API docs: **http://localhost:8000/docs**
 
 ---
 
@@ -518,11 +553,11 @@ Open <http://localhost:3000>, sign in, upload a 10-K, and ask a question.
 
 ```text
 Fin-Eye/
-├── README.md                       ← this file
+├── README.md                             ← this file
+├── local_dev_windows.md                  ← full Windows 11 setup + test guide
 ├── LICENSE
-├── docker-compose.yml
-├── .github/workflows/backend-tests.yml   ← CI: pytest + 70% coverage gate
-├── frontend/                       ← Next.js 15 + Tailwind + Clerk
+├── .github/workflows/backend-tests.yml  ← CI: pytest + 70% coverage gate
+├── frontend/                             ← Next.js 15 + Tailwind + Clerk
 │   ├── public/
 │   ├── src/
 │   │   ├── app/
@@ -531,35 +566,35 @@ Fin-Eye/
 │   │   └── store/
 │   └── package.json
 └── backend/
-    ├── pytest.ini                  ← asyncio mode + strict markers
-    ├── .coveragerc                 ← branch coverage; ML modules omitted
-    ├── alembic/                    ← versioned schema migrations
+    ├── pytest.ini                        ← asyncio mode + strict markers
+    ├── .coveragerc                       ← branch coverage; ML modules omitted
+    ├── .env.example                      ← copy to .env and fill in 3 keys
+    ├── alembic/                          ← versioned schema migrations
     ├── app/
-    │   ├── main.py                 ← FastAPI app + lifespan
-    │   ├── core/                   ← config, security (Clerk), DI
-    │   ├── db/                     ← models, schemas, session
-    │   ├── api/routes/             ← auth, documents, queries, comparisons, alerts, analytics
+    │   ├── main.py                       ← FastAPI app + lifespan
+    │   ├── core/                         ← config, security (Clerk), DI
+    │   ├── db/                           ← models, schemas, session
+    │   ├── api/routes/                   ← auth, documents, queries, comparisons, alerts, analytics
     │   └── services/
-    │       ├── storage.py          ← local FS / S3 abstraction
-    │       ├── document/           ← extractor, chunker, embedder
-    │       ├── rag/                ← pipeline, retriever, reranker, generator, bm25_store
-    │       ├── analytics/          ← anomaly, comparison
-    │       ├── financial/          ← metric extraction, FinBERT sentiment
-    │       ├── audit.py            ← PostgreSQL + DynamoDB audit log
-    │       ├── alerts.py           ← alert dispatcher
-    │       ├── edgar.py            ← SEC EDGAR poller
-    │       └── aws/                ← S3, SQS, SES, DynamoDB, Comprehend
+    │       ├── storage.py                ← local FS / S3 abstraction
+    │       ├── document/                 ← extractor, chunker, embedder
+    │       ├── rag/                      ← pipeline, retriever, reranker, generator, qdrant_store
+    │       ├── analytics/                ← anomaly, comparison
+    │       ├── financial/                ← metric extraction, FinBERT sentiment
+    │       ├── audit.py                  ← PostgreSQL + DynamoDB audit log
+    │       ├── alerts.py                 ← alert dispatcher
+    │       ├── edgar.py                  ← SEC EDGAR poller
+    │       └── aws/                      ← S3, SQS, SES, DynamoDB, Comprehend
     ├── tests/
-    │   ├── conftest.py             ← in-memory SQLite + stub user
+    │   ├── conftest.py                   ← in-memory SQLite + stub user
     │   ├── test_chunker.py
-    │   ├── test_retriever.py       ← ChromaDB + BM25 mocked
+    │   ├── test_retriever.py
     │   ├── test_comparisons.py
     │   ├── test_anomaly.py
-    │   ├── test_query_pipeline.py  ← full RAG pipeline integration
+    │   ├── test_query_pipeline.py        ← full RAG pipeline integration
     │   ├── test_alerts_api.py
     │   ├── test_edgar.py
     │   └── test_health.py
-    ├── Dockerfile
     └── requirements.txt
 ```
 
