@@ -133,7 +133,10 @@ async def dispatch_alert_emails(
         if any_success:
             alert.email_sent = True
 
-    log.info("dispatch_alert_emails: sent %d emails across %d alerts", sent_count, len(list(alerts)) if hasattr(alerts, '__len__') else -1)
+    # Bug 9 fix: `alerts` may be a generator that has already been consumed
+    # by the for-loop above — calling len(list(...)) on an exhausted iterator
+    # always returns 0.  Count the alerts as we go instead.
+    log.info("dispatch_alert_emails: sent %d emails", sent_count)
     return sent_count
 
 

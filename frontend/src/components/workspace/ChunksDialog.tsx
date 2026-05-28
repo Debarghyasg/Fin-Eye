@@ -13,8 +13,8 @@
  *
  * The dialog:
  *   - Pages through chunks 50 at a time (matches the backend default).
- *   - Lets the user filter by `chunk_type` (text / table / section_header /
- *     list / footnote) to focus on tabular extractions.
+ *   - Lets the user filter by `chunk_type` (prose / table / header) matching
+ *     the backend ChunkType enum values exactly.
  *   - Shows page number, section header and chunk index next to each
  *     excerpt so the chunk can be cross-referenced against the PDF.
  *
@@ -39,13 +39,23 @@ import { cn } from "@/lib/utils";
 import { IS_LIVE_API } from "@/lib/api/client";
 import { listChunks, type ChunkOut } from "@/lib/api/documents";
 
+/**
+ * Filter chip values must match the backend ChunkType enum *values* in
+ * app/db/models.py (NOT the Python attribute names). The enum currently
+ * exposes only three kinds:
+ *   ChunkType.PROSE  → "prose"
+ *   ChunkType.TABLE  → "table"
+ *   ChunkType.HEADER → "header"
+ *
+ * If the backend grows new types ("list", "footnote", …) add chips here
+ * AFTER the new ChunkType members ship — sending an unknown value would
+ * silently return zero rows because the SQLAlchemy filter is exact-match.
+ */
 const CHUNK_TYPE_FILTERS: Array<{ value: string | undefined; label: string }> = [
   { value: undefined, label: "All" },
-  { value: "text", label: "Text" },
+  { value: "prose", label: "Prose" },
   { value: "table", label: "Table" },
-  { value: "section_header", label: "Headers" },
-  { value: "list", label: "List" },
-  { value: "footnote", label: "Footnote" },
+  { value: "header", label: "Headers" },
 ];
 
 export interface ChunksDialogProps {

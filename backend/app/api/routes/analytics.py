@@ -138,7 +138,10 @@ async def pipeline_health(
         detail=f"table={settings.DYNAMODB_AUDIT_TABLE}" if settings.USE_DYNAMODB else "Optional audit logging",
     ))
 
-    overall = "ok" if all(s.status == "ok" for s in stages[:1]) else "degraded"
+    # Bug 4 fix: was `stages[:1]` which only checked Postgres.
+    # Any non-ok, non-disabled, non-not_configured stage should degrade overall.
+    degraded_statuses = {"degraded", "down"}
+    overall = "degraded" if any(s.status in degraded_statuses for s in stages) else "ok"
 
     return PipelineHealthResponse(overall=overall, stages=stages)
 

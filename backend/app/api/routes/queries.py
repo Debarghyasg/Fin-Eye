@@ -113,14 +113,22 @@ async def get_query_history(
     )
     logs = results.scalars().all()
 
+    # Bug 5 fix: the workspace page's adaptQueryHistoryItem() reads
+    # source_chunk_ids, source_doc_ids, confidence_score, and model_used —
+    # all of which were silently dropped when we serialised to a plain dict
+    # with only 6 keys.  Return every column so the frontend can parse them.
     items = [
         {
             "id": ql.id,
-            "query": ql.query_text,
-            "answer": ql.answer_text,
-            "confidence": ql.confidence_score,
+            "user_id": ql.user_id,
+            "workspace_id": ql.workspace_id,
+            "query_text": ql.query_text,
+            "answer_text": ql.answer_text,
+            "confidence_score": ql.confidence_score,
+            "source_chunk_ids": ql.source_chunk_ids,
+            "source_doc_ids": ql.source_doc_ids,
             "latency_ms": ql.latency_ms,
-            "model": ql.model_used,
+            "model_used": ql.model_used,
             "created_at": ql.created_at.isoformat(),
         }
         for ql in logs

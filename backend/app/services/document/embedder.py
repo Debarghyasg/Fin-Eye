@@ -97,77 +97,111 @@ async def embed_and_index_chunks(
         len(chunks), document_id, settings.EMBEDDING_MODEL, settings.QDRANT_SPARSE_MODEL,
     )
 
-    # The collection might be missing if this is the first ever upsert in a
-    # fresh deployment. Cheap idempotent check.
-    await asyncio.to_thread(qdrant_store.ensure_collection)
+    # ── Wrap the heavy work in a try/except so a failure here cannot
+    # leave the document permanently stuck at EMBEDDING. The outer
+    # _process_document_pipeline catch logs the exception but doesn't
+    # touch the row, so we own the FAILED transition here. We still
+    # re-raise so the caller's logging fires unchanged. ────────────────
+    try:
+        # The collection might be missing if this is the first ever upsert
+        # in a fresh deployment. Cheap idempotent check.
+        await asyncio.to_thread(qdrant_store.ensure_collection)
 
-    batch_size = 100
-    total_upserted = 0
+        batch_size = 100
+        total_upserted = 0
 
-    for batch_start in range(0, len(chunks), batch_size):
-        batch = chunks[batch_start: batch_start + batch_size]
-        texts = [c.text for c in batch]
+        for batch_start in range(0, len(chunks), batch_size):
+            batch = chunks[batch_start: batch_start + batch_size]
+            texts = [c.text for c in batch]
 
-        # Compute dense + sparse in parallel threads — both are CPU-bound.
-        dense_task = asyncio.to_thread(_embed_dense, texts)
-        sparse_task = asyncio.to_thread(qdrant_store.encode_sparse_batch, texts)
-        dense_vectors, sparse_embs = await asyncio.gather(dense_task, sparse_task)
+            # Compute dense + sparse in parallel threads — both are CPU-bound.
+            dense_task = asyncio.to_thread(_embed_dense, texts)
+            sparse_task = asyncio.to_thread(qdrant_store.encode_sparse_batch, texts)
+            dense_vectors, sparse_embs = await asyncio.gather(dense_task, sparse_task)
 
-        # Build PointStructs in the worker thread (avoids importing qdrant
-        # types inside this async function for clarity).
-        def _build_points():
-            from qdrant_client.http import models as qm
+            # Build PointStructs in the worker thread (avoids importing qdrant
+            # types inside this async function for clarity).
+            def _build_points():
+                from qdrant_client.http import models as qm
 
-            points = []
-            for c, dense_vec, sparse_emb in zip(batch, dense_vectors, sparse_embs):
-                points.append(qm.PointStruct(
-                    id=qdrant_store.point_id_for(document_id, c.chunk_index),
-                    vector={
-                        settings.QDRANT_DENSE_VECTOR_NAME: dense_vec,
-                        settings.QDRANT_SPARSE_VECTOR_NAME:
-                            qdrant_store.to_qdrant_sparse_vector(sparse_emb),
-                    },
-                    payload={
-                        "document_id":    document_id,
-                        "workspace_id":   workspace_id,
-                        "chunk_index":    c.chunk_index,
-                        "chunk_type":     c.chunk_type.value,
-                        "page_number":    c.page_number or 0,
-                        "source_section": c.source_section or "",
-                        "ticker":         ticker or "",
-                        "fiscal_period":  fiscal_period or "",
-                        "text_preview":   c.text[:500],
-                    },
-                ))
-            return points
+                points = []
+                for c, dense_vec, sparse_emb in zip(batch, dense_vectors, sparse_embs):
+                    points.append(qm.PointStruct(
+                        id=qdrant_store.point_id_for(document_id, c.chunk_index),
+                        vector={
+                            settings.QDRANT_DENSE_VECTOR_NAME: dense_vec,
+                            settings.QDRANT_SPARSE_VECTOR_NAME:
+                                qdrant_store.to_qdrant_sparse_vector(sparse_emb),
+                        },
+                        payload={
+                            "document_id":    document_id,
+                            "workspace_id":   workspace_id,
+                            "chunk_index":    c.chunk_index,
+                            "chunk_type":     c.chunk_type.value,
+                            "page_number":    c.page_number or 0,
+                            "source_section": c.source_section or "",
+                            "ticker":         ticker or "",
+                            "fiscal_period":  fiscal_period or "",
+                            "text_preview":   c.text[:500],
+                        },
+                    ))
+                return points
 
-        points = await asyncio.to_thread(_build_points)
-        await asyncio.to_thread(qdrant_store.upsert_points, points)
+            points = await asyncio.to_thread(_build_points)
+            await asyncio.to_thread(qdrant_store.upsert_points, points)
 
-        total_upserted += len(batch)
-        log.debug(
-            "Qdrant upsert: doc=%s range=%d–%d",
-            document_id, batch_start, batch_start + len(batch),
+            total_upserted += len(batch)
+            log.debug(
+                "Qdrant upsert: doc=%s range=%d–%d",
+                document_id, batch_start, batch_start + len(batch),
+            )
+
+        # Write Qdrant point IDs back to Postgres so the retriever can look up
+        # full chunk text from a hit. The legacy column name is preserved.
+        db_chunks = (await db.execute(
+            select(ChunkModel)
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )).scalars().all()
+        for db_chunk in db_chunks:
+            db_chunk.pinecone_id = qdrant_store.point_id_for(document_id, db_chunk.chunk_index)
+            db_chunk.embedding_model = settings.EMBEDDING_MODEL
+
+        doc.status = DocumentStatus.INDEXED
+        await db.commit()
+
+        log.info(
+            "Indexing complete: document_id=%s vectors=%d", document_id, total_upserted,
         )
+        return total_upserted
 
-    # Write Qdrant point IDs back to Postgres so the retriever can look up
-    # full chunk text from a hit. The legacy column name is preserved.
-    db_chunks = (await db.execute(
-        select(ChunkModel)
-        .where(ChunkModel.document_id == document_id)
-        .order_by(ChunkModel.chunk_index)
-    )).scalars().all()
-    for db_chunk in db_chunks:
-        db_chunk.pinecone_id = qdrant_store.point_id_for(document_id, db_chunk.chunk_index)
-        db_chunk.embedding_model = settings.EMBEDDING_MODEL
+    except Exception as exc:
+        # Mark the document FAILED in a *fresh* session — the existing one may
+        # be in a half-rolled-back state if the upsert raised mid-commit.
+        log.exception(
+            "Embedding/indexing failed for document_id=%s — marking FAILED",
+            document_id,
+        )
+        try:
+            from app.db.session import AsyncSessionLocal
 
-    doc.status = DocumentStatus.INDEXED
-    await db.commit()
-
-    log.info(
-        "Indexing complete: document_id=%s vectors=%d", document_id, total_upserted,
-    )
-    return total_upserted
+            async with AsyncSessionLocal() as fail_db:
+                fail_doc = (await fail_db.execute(
+                    select(Document).where(Document.id == document_id)
+                )).scalar_one_or_none()
+                if fail_doc is not None:
+                    fail_doc.status = DocumentStatus.FAILED
+                    fail_doc.error_message = f"Embedding stage failed: {exc}"
+                    await fail_db.commit()
+        except Exception as commit_exc:
+            # If we can't even write FAILED, log and let the original
+            # exception propagate; the row will stay at EMBEDDING but at
+            # least the worker logs make the cause clear.
+            log.error(
+                "Could not mark document_id=%s as FAILED: %s",
+                document_id, commit_exc,
+            )
+        raise
 
 
 # ── Deletion ──────────────────────────────────────────────────────────────────
