@@ -17,11 +17,11 @@
  * reader knows what's live and what's not.
  */
 import React, { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Zap, TrendingUp, Activity, Coins, FileText, BarChart3,
-  AlertCircle,
+  AlertCircle, Shield, Clock, Database,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -35,9 +35,16 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   IS_LIVE_API,
+  getMe,
+  getTokenUsage,
+  getUserAuditAnalytics,
   getWorkspaceAuditAnalytics,
+  type TokenUsageResponse,
+  type UserAuditTrailResponse,
+  type UserOut,
   type WorkspaceAnalytics,
 } from "@/lib/api";
+import { useAuth } from "@clerk/nextjs";
 import {
   mockConfidenceTrend,
   mockModelMix,
@@ -76,14 +83,44 @@ export default function AnalyticsPage() {
   // Resolve the real workspace UUID. Live calls are gated on this so we
   // never hit the backend with the literal string "default".
   const workspaceId = useWorkspaceId();
+  const { getToken, isSignedIn } = useAuth();
+  const liveEnabled = IS_LIVE_API && !!workspaceId;
 
   // Live audit aggregates — only fired when an API URL is configured
   // AND we have a real workspace_id resolved.
   const { data: live, isLoading: liveLoading, error: liveError } = useQuery<WorkspaceAnalytics>({
     queryKey: ["audit-analytics", workspaceId, 30],
-    queryFn: () => getWorkspaceAuditAnalytics(workspaceId!, 30),
-    enabled: IS_LIVE_API && !!workspaceId,
+    queryFn: () => getWorkspaceAuditAnalytics(workspaceId!, 30, getToken),
+    enabled: liveEnabled,
     staleTime: 5 * 60_000,
+  });
+
+  // Token usage breakdown — POST /analytics/audit/token-usage
+  // We pass just the current workspace; the endpoint accepts a list so a
+  // future "All workspaces" toggle can pass the full owned set.
+  const tokenUsageQuery = useQuery<TokenUsageResponse>({
+    queryKey: ["token-usage", workspaceId, 30],
+    queryFn: () => getTokenUsage([workspaceId!], 30, getToken),
+    enabled: liveEnabled,
+    staleTime: 5 * 60_000,
+  });
+
+  // GET /auth/me — needed because the audit-trail endpoint identifies users
+  // by their internal User UUID, not by Clerk's user id.
+  const meQuery = useQuery<UserOut>({
+    queryKey: ["me"],
+    queryFn: () => getMe(getToken),
+    enabled: IS_LIVE_API && Boolean(isSignedIn),
+    staleTime: 60_000,
+  });
+
+  // GET /analytics/audit/user/{user_id} — self-service compliance trail.
+  // Kicks off only after meQuery resolves.
+  const auditTrailQuery = useQuery<UserAuditTrailResponse>({
+    queryKey: ["user-audit-trail", meQuery.data?.id, 50],
+    queryFn: () => getUserAuditAnalytics(meQuery.data!.id, { limit: 50 }, getToken),
+    enabled: liveEnabled && Boolean(meQuery.data?.id),
+    staleTime: 60_000,
   });
 
   // Aggregates: live values when available, else summed from the mock series.
@@ -443,7 +480,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* ── Row 3: most queried docs + model mix ─────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Most queried documents — horizontal bar */}
           <motion.section
             initial={{ opacity: 0, y: 16 }}
@@ -555,7 +592,280 @@ export default function AnalyticsPage() {
             </div>
           </motion.section>
         </div>
+
+        {/* ── Row 4: token usage + my audit trail ─────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pb-6">
+          <TokenUsageCard query={tokenUsageQuery} />
+          <UserAuditTrailCard
+            query={auditTrailQuery}
+            meQuery={meQuery}
+            liveEnabled={liveEnabled}
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Row 4 — Token usage + user audit trail
+ * Both cards are pure consumers of React Query results. They render a
+ * skeleton during load, an inline error block on failure, and degrade
+ * gracefully when the backend reports the feature isn't configured
+ * (e.g. token usage requires USE_DYNAMODB=true on the backend).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function TokenUsageCard({
+  query,
+}: {
+  query: UseQueryResult<TokenUsageResponse, Error>;
+}) {
+  const { data, isLoading, isError, error } = query;
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.5 }}
+      className="gradient-card p-5"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Coins className="w-3.5 h-3.5 text-fin-400" />
+            Token Usage &amp; Cost
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            POST /analytics/audit/token-usage · last 30 days
+          </p>
+        </div>
+        {data && (
+          <Badge variant="outline" className="text-[10px]">
+            {data.workspace_count} workspace{data.workspace_count === 1 ? "" : "s"}
+          </Badge>
+        )}
+      </div>
+
+      {!IS_LIVE_API && (
+        <p className="text-xs text-muted-foreground py-6 text-center">
+          Connect a backend to view live token consumption.
+        </p>
+      )}
+
+      {IS_LIVE_API && isLoading && (
+        <div className="grid grid-cols-3 gap-3">
+          <Skeleton className="h-16" />
+          <Skeleton className="h-16" />
+          <Skeleton className="h-16" />
+        </div>
+      )}
+
+      {IS_LIVE_API && isError && (
+        <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-red-300">Token usage unavailable</p>
+            <p className="text-muted-foreground">
+              {(error as Error)?.message ?? "Backend returned an error."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {IS_LIVE_API && data && data.error && (
+        <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs">
+          <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-amber-300">{data.error}</p>
+            {data.note && <p className="text-muted-foreground mt-0.5">{data.note}</p>}
+          </div>
+        </div>
+      )}
+
+      {IS_LIVE_API && data && !data.error && (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <Stat
+              label="Queries"
+              value={formatNumber(data.total_queries)}
+              hint={`${data.period_days}d`}
+            />
+            <Stat
+              label="Tokens"
+              value={formatNumber(data.total_tokens)}
+              hint="prompt + completion"
+            />
+            <Stat
+              label="Est. cost"
+              value={`$${data.estimated_cost_usd.toFixed(4)}`}
+              hint="GPT-4 blended"
+            />
+          </div>
+          {data.note && (
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              {data.note}
+            </p>
+          )}
+        </>
+      )}
+    </motion.section>
+  );
+}
+
+function UserAuditTrailCard({
+  query,
+  meQuery,
+  liveEnabled,
+}: {
+  query: UseQueryResult<UserAuditTrailResponse, Error>;
+  meQuery: UseQueryResult<UserOut, Error>;
+  liveEnabled: boolean;
+}) {
+  const { data, isLoading, isError, error } = query;
+  // Combine postgres + dynamodb log slices into one chronological list
+  // for display. Both shapes are loose dicts so we render only the keys
+  // we know about and ignore the rest.
+  const entries = data
+    ? [...data.audit_trail.dynamodb_logs, ...data.audit_trail.postgres_logs].slice(0, 8)
+    : [];
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.55 }}
+      className="gradient-card p-5"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Shield className="w-3.5 h-3.5 text-fin-400" />
+            My Activity Trail
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            GET /analytics/audit/user/&#123;user_id&#125; · SEC 17a-4
+          </p>
+        </div>
+        {data && (
+          <Badge variant="outline" className="text-[10px]">
+            {formatNumber(data.audit_trail.total_entries)} entries
+          </Badge>
+        )}
+      </div>
+
+      {!liveEnabled && (
+        <p className="text-xs text-muted-foreground py-6 text-center">
+          Sign in and connect a backend to load your activity trail.
+        </p>
+      )}
+
+      {liveEnabled && (meQuery.isLoading || isLoading) && (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          ))}
+        </div>
+      )}
+
+      {liveEnabled && (meQuery.isError || isError) && (
+        <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-red-300">Could not load audit trail</p>
+            <p className="text-muted-foreground">
+              {((meQuery.error ?? error) as Error | undefined)?.message ?? "Backend unavailable."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {liveEnabled && data && entries.length === 0 && (
+        <div className="rounded-lg border border-dashed border-white/10 py-6 text-center text-xs text-muted-foreground">
+          <Database className="w-4 h-4 mx-auto mb-2 opacity-50" />
+          No audit entries yet.
+          <p className="mt-1 text-muted-foreground/70">
+            DynamoDB audit logging surfaces queries here when{" "}
+            <code className="text-fin-300">USE_DYNAMODB=true</code>.
+          </p>
+        </div>
+      )}
+
+      {liveEnabled && entries.length > 0 && (
+        <ul className="space-y-2">
+          {entries.map((entry, i) => (
+            <AuditEntryRow key={String(entry.query_log_id ?? i)} entry={entry} />
+          ))}
+        </ul>
+      )}
+
+      {data?.compliance_note && (
+        <p className="mt-3 text-[10px] text-muted-foreground/70">
+          {data.compliance_note}
+        </p>
+      )}
+    </motion.section>
+  );
+}
+
+/* ── Tiny presentational helpers used only by Row 4 ──────────────────── */
+
+function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-lg bg-white/[0.02] border border-white/[0.05] p-3">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+        {label}
+      </p>
+      <p className="text-xl font-bold text-foreground leading-tight mt-1">{value}</p>
+      {hint && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</p>}
+    </div>
+  );
+}
+
+function AuditEntryRow({ entry }: { entry: { [key: string]: unknown } }) {
+  const queryText = typeof entry.query_text === "string" ? entry.query_text : null;
+  const model = typeof entry.model_used === "string" ? entry.model_used : null;
+  const latency = typeof entry.latency_ms === "number" ? entry.latency_ms : null;
+  const confidence =
+    typeof entry.confidence_score === "number" ? entry.confidence_score : null;
+  // DynamoDB items typically use `timestamp` (ISO) or `created_at`.
+  const ts =
+    typeof entry.timestamp === "string"
+      ? entry.timestamp
+      : typeof entry.created_at === "string"
+        ? entry.created_at
+        : null;
+
+  return (
+    <li className="rounded-lg border border-white/[0.05] bg-white/[0.02] p-3">
+      <p className="text-xs text-foreground line-clamp-2">
+        {queryText ?? "(no query text recorded)"}
+      </p>
+      <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[10px] text-muted-foreground">
+        {model && (
+          <span className="inline-flex items-center gap-1">
+            <Database className="w-2.5 h-2.5" /> {model}
+          </span>
+        )}
+        {latency != null && (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="w-2.5 h-2.5" /> {latency}ms
+          </span>
+        )}
+        {confidence != null && (
+          <span>conf. {(confidence * 100).toFixed(0)}%</span>
+        )}
+        {ts && <span className="ml-auto">{new Date(ts).toLocaleString()}</span>}
+      </div>
+    </li>
   );
 }

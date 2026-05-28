@@ -105,12 +105,11 @@ class Settings(BaseSettings):
     CHROMA_PORT: int = 8001
     CHROMA_COLLECTION: str = "finsight_chunks"
 
-    # ── Redis — REMOVED ───────────────────────────────────────────
-    # The BM25 cache that used Redis was replaced by Qdrant native
-    # sparse vectors. Redis is not imported anywhere in the codebase.
-    # These settings are kept so old .env files load without error.
-    REDIS_URL: str = "redis://localhost:6379/0"   # unused
-    REDIS_BM25_TTL: int = 604800                  # unused, deprecated
+    # ── Redis (cache only) ────────────────────────────────────────
+    # Install from https://github.com/microsoftarchive/redis/releases
+    # Used for response caching only — NOT as a Celery broker
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_BM25_TTL: int = 604800  # deprecated — kept so old .env files load
 
     # ── Celery task queue ─────────────────────────────────────────
     # CELERY_TASK_ALWAYS_EAGER=true  → recommended for local dev on Windows
