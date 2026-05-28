@@ -77,8 +77,7 @@ export default function SignInPage() {
           transition={{ duration: 0.5, delay: 0.1 }}
         >
           <SignIn
-            afterSignInUrl="/dashboard"
-            redirectUrl="/dashboard"
+            fallbackRedirectUrl="/dashboard"
             appearance={{
               variables: {
                 colorPrimary: "#22a269",
