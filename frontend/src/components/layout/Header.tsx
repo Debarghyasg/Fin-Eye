@@ -1,9 +1,20 @@
 "use client";
 import React from "react";
 import { motion } from "framer-motion";
-import { Search, Bell, Shield, ChevronDown } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
+import { Search, Bell, Shield, ChevronDown, Activity } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
+import { IS_LIVE_API, getApiHealth, type ApiHealthResponse } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
 
 export function Header({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -26,6 +37,9 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
             className="w-60 pl-9 h-8 text-xs"
           />
         </div>
+
+        {/* Live API health indicator — wires GET /analytics/health */}
+        <ApiHealthDot />
 
         {/* Alerts bell */}
         <Button variant="ghost" size="icon-sm" className="relative">
@@ -55,5 +69,95 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
         </button>
       </div>
     </header>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ApiHealthDot — small live indicator wired to GET /analytics/health.
+ *
+ * Polls every 30 s. Renders a coloured dot (emerald=ok, amber=degraded,
+ * red=down, slate=disabled in mock mode) plus a hover tooltip with the
+ * backend version + database status from the health response.
+ *
+ * The endpoint is no-auth on the backend, so we deliberately skip the
+ * Clerk token (and therefore don't gate on `isSignedIn`) — uptime should
+ * surface even on the public landing parts of the app.
+ * ────────────────────────────────────────────────────────────────────────── */
+function ApiHealthDot() {
+  const { getToken } = useAuth();
+
+  const healthQuery = useQuery<ApiHealthResponse>({
+    queryKey: ["api-health"],
+    queryFn: () => getApiHealth(getToken),
+    enabled: IS_LIVE_API,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+    retry: 1,
+  });
+
+  // Map the (status × isError) cross-product to a single visual state.
+  const visual = (() => {
+    if (!IS_LIVE_API) {
+      return { dot: "bg-slate-500", ping: false, label: "Mock mode" };
+    }
+    if (healthQuery.isLoading) {
+      return { dot: "bg-slate-400", ping: false, label: "Checking…" };
+    }
+    if (healthQuery.isError || !healthQuery.data) {
+      return { dot: "bg-red-500", ping: true, label: "API unreachable" };
+    }
+    if (healthQuery.data.status === "ok") {
+      return { dot: "bg-emerald-400", ping: true, label: "API healthy" };
+    }
+    if (healthQuery.data.status === "degraded") {
+      return { dot: "bg-amber-400", ping: true, label: "API degraded" };
+    }
+    return { dot: "bg-red-500", ping: true, label: `API ${healthQuery.data.status}` };
+  })();
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => healthQuery.refetch()}
+            className="relative flex items-center justify-center w-7 h-7 rounded-md hover:bg-white/5 transition-colors"
+            aria-label={`API status: ${visual.label}`}
+          >
+            <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+            {/* Status dot, top-right corner */}
+            <span className="absolute top-1 right-1">
+              <span className={cn("block w-2 h-2 rounded-full", visual.dot)} />
+              {visual.ping && (
+                <span
+                  className={cn(
+                    "absolute inset-0 w-2 h-2 rounded-full animate-ping opacity-50",
+                    visual.dot,
+                  )}
+                />
+              )}
+            </span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="end" className="text-xs">
+          <p className="font-medium">{visual.label}</p>
+          {healthQuery.data && (
+            <>
+              <p className="text-muted-foreground mt-0.5">
+                DB: <span className="font-mono">{healthQuery.data.database}</span>
+              </p>
+              <p className="text-muted-foreground">
+                v{healthQuery.data.version} · {healthQuery.data.environment}
+              </p>
+            </>
+          )}
+          {!IS_LIVE_API && (
+            <p className="text-muted-foreground mt-0.5">
+              Set <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> to enable.
+            </p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
