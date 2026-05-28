@@ -14,14 +14,30 @@
 const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 /**
- * `IS_LIVE_API` is true when the developer has explicitly pointed the
- * frontend at a real backend (typical: `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`).
- * Pages should check this flag and fall back to the mock store when it is false,
- * so the existing offline-friendly dev experience keeps working.
+ * `IS_LIVE_API` is true when NEXT_PUBLIC_API_URL is set in frontend/.env.local.
+ *
+ * When false, every page falls back to in-memory mock data — nothing
+ * touches the real database. If the app looks wrong or uploads don't persist,
+ * this is almost always the cause.
+ *
+ * Fix: copy frontend/.env.local.example to frontend/.env.local and fill in
+ * your Clerk keys. The file must contain:
+ *   NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
  */
 export const IS_LIVE_API: boolean = Boolean(RAW_API_URL && RAW_API_URL.length > 0);
 
 export const API_BASE: string = RAW_API_URL ?? "http://localhost:8000/api/v1";
+
+// Warn loudly in the browser console when running in mock mode so the
+// developer knows immediately why nothing is hitting the database.
+if (typeof window !== "undefined" && !IS_LIVE_API) {
+  console.warn(
+    "[Fin-Eye] NEXT_PUBLIC_API_URL is not set.\n" +
+    "The app is running in MOCK MODE — no data goes to the real database.\n" +
+    "Fix: copy frontend/.env.local.example → frontend/.env.local and set NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1\n" +
+    "Then restart the frontend (npm run dev)."
+  );
+}
 
 export class ApiError extends Error {
   status: number;

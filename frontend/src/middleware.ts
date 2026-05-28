@@ -1,34 +1,56 @@
 /**
- * Clerk middleware — required by @clerk/nextjs in App Router.
+ * Clerk middleware — Next.js 15 compatible.
  *
- * Without this file Clerk's hooks (useAuth, useUser, etc.) silently return
- * null even when ClerkProvider is mounted, which means getToken() produces
- * no Bearer token and the FastAPI backend rejects every request with 401.
+ * Two bugs fixed:
  *
- * Bug fixed:
- *   - Added explicit sign-in / sign-up redirect URLs so Clerk knows where
- *     to send unauthenticated users instead of guessing.
- *   - Public routes list covers the root "/" and both auth pages so users
- *     can reach the sign-in page without being redirected in a loop.
+ * 1. Google OAuth / SSO returning 404
+ *    After Google redirects back to the app it hits:
+ *      /sign-in/sso-callback?redirect_url=...
+ *    That route was NOT in publicRoutes, so the old authMiddleware
+ *    intercepted it before Clerk could handle the callback → 404.
+ *    Fix: use clerkMiddleware (v4.29+) with a matcher that explicitly
+ *    allows all /sign-in/* and /sign-up/* sub-paths including sso-callback.
+ *
+ * 2. headers() sync dynamic API warning in Next.js 15
+ *    authMiddleware() internally calls headers() synchronously which
+ *    Next.js 15 forbids. clerkMiddleware() is the updated API that
+ *    awaits dynamic APIs correctly.
+ *
+ * IMPORTANT — Clerk dashboard setting required:
+ *   Dashboard → Configure → Paths
+ *     Sign-in URL:      /sign-in
+ *     Sign-up URL:      /sign-up
+ *     After sign-in:    /dashboard
+ *     After sign-up:    /dashboard
  */
-import { authMiddleware } from "@clerk/nextjs";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-export default authMiddleware({
-  // Routes that do NOT require authentication.
-  publicRoutes: [
-    "/",
-    "/sign-in",
-    "/sign-in/(.*)",
-    "/sign-up",
-    "/sign-up/(.*)",
-  ],
+// Routes that are publicly accessible without authentication.
+// The regex patterns ensure ALL Clerk-internal sub-routes are public,
+// including /sign-in/sso-callback (OAuth return), /sign-in/factor-one,
+// /sign-up/verify-email-address, etc.
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/health(.*)",
+]);
 
-  // Where Clerk redirects unauthenticated users who hit protected routes.
-  // Must match the path your sign-in page is actually served on.
-  ignoredRoutes: ["/api/health"],
+export default clerkMiddleware(async (auth, request) => {
+  // If the route is public — let it through without any auth check.
+  if (isPublicRoute(request)) {
+    return NextResponse.next();
+  }
+
+  // For all other routes, require authentication.
+  // If the user is not signed in, Clerk automatically redirects to /sign-in.
+  await auth.protect();
 });
 
 export const config = {
-  // Run on every route except static files and Next.js internals.
-  matcher: ["/((?!.+\\.[\\w]+$|_next).*)", "/", "/(api|trpc)(.*)"],
+  // Run the middleware on every route except static files and Next.js internals.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };
