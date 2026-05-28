@@ -74,12 +74,26 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if user is None:
+        # ── Bug E fix: first sign-in — create user AND a default workspace ──
+        # Without the workspace, GET /auth/me/workspaces returns [] and
+        # useWorkspaceId() returns null, which silently breaks every API call
+        # that needs a workspace_id (uploads, queries, alerts, comparisons…).
+        from app.db.models import Workspace
         user = User(
             clerk_user_id=clerk_user_id,
             email=email or "",
         )
         db.add(user)
-        await db.flush()  # get auto-generated id without committing yet
+        await db.flush()  # get user.id before creating the workspace
+
+        default_workspace = Workspace(
+            owner_id=user.id,
+            name="My Workspace",
+            description="Default workspace created on first sign-in.",
+            is_default=True,
+        )
+        db.add(default_workspace)
+        await db.flush()
 
     return user
 
