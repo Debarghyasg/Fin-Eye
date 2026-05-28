@@ -37,14 +37,15 @@ export const metadata: Metadata = {
  * `src/middleware.ts` runs; without both, document uploads silently send
  * no Authorization header and the backend rejects them with 401.
  */
+/**
+ * ClerkProvider picks up the NEXT_PUBLIC_CLERK_SIGN_IN_URL,
+ * NEXT_PUBLIC_CLERK_SIGN_UP_URL, NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL
+ * and NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL env vars automatically —
+ * no need to pass them as props when they are in .env.local.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
-      afterSignInUrl="/dashboard"
-      afterSignUpUrl="/dashboard"
-    >
+    <ClerkProvider>
       <html lang="en" className={inter.variable}>
         <body className={`${inter.className} antialiased`}>{children}</body>
       </html>
