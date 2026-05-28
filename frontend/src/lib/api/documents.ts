@@ -76,6 +76,36 @@ export interface PaginatedList<T> {
   has_next: boolean;
 }
 
+/**
+ * Mirrors backend/app/db/schemas.py::ChunkOut. Used by the chunks viewer
+ * dialog so analysts can inspect what actually got indexed.
+ */
+export interface ChunkOut {
+  id: string;
+  document_id: string;
+  text: string;
+  chunk_type: "paragraph" | "table" | "section_header" | "list_item";
+  chunk_index: number;
+  page_number: number | null;
+  char_start: number | null;
+  char_end: number | null;
+  source_section: string | null;
+  table_header: string | null;
+  created_at: string;
+}
+
+/**
+ * Partial update body for PATCH /documents/{id}. Every field is optional;
+ * the backend only mutates the keys you actually send. Setting a field to
+ * `null` clears it; omitting it leaves the existing value untouched.
+ */
+export interface DocumentUpdate {
+  doc_type?: DocumentType;
+  company_name?: string | null;
+  ticker?: string | null;
+  fiscal_period?: string | null;
+}
+
 export async function listDocuments(
   workspaceId: string,
   opts: { page?: number; page_size?: number } = {},
@@ -103,6 +133,48 @@ export async function getDocumentStatus(
   getToken?: GetTokenFn
 ): Promise<DocumentStatusResponse> {
   return apiFetch<DocumentStatusResponse>(`/documents/${documentId}/status`, {
+    getToken,
+  });
+}
+
+/**
+ * Paginated chunk list. Default page size matches the backend cap (50);
+ * pass `chunkType` to filter to a single block kind ("table" is useful
+ * when auditing financial-figure extraction).
+ */
+export async function getDocumentChunks(
+  documentId: string,
+  opts: {
+    page?: number;
+    page_size?: number;
+    chunkType?: ChunkOut["chunk_type"];
+  } = {},
+  getToken?: GetTokenFn
+): Promise<PaginatedList<ChunkOut>> {
+  const query: Record<string, string | number | undefined> = {
+    page: opts.page ?? 1,
+    page_size: opts.page_size ?? 50,
+  };
+  if (opts.chunkType) query.chunk_type = opts.chunkType;
+  return apiFetch<PaginatedList<ChunkOut>>(`/documents/${documentId}/chunks`, {
+    query,
+    getToken,
+  });
+}
+
+/**
+ * PATCH /documents/{id} — analyst metadata correction (ticker, doc_type,
+ * fiscal_period, company_name). Returns the freshly persisted DocumentOut
+ * so the caller can prime the React Query cache without a re-fetch.
+ */
+export async function updateDocument(
+  documentId: string,
+  body: DocumentUpdate,
+  getToken?: GetTokenFn
+): Promise<DocumentOut> {
+  return apiFetch<DocumentOut>(`/documents/${documentId}`, {
+    method: "PATCH",
+    json: body,
     getToken,
   });
 }
