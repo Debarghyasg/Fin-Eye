@@ -22,12 +22,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
 
-import { IS_LIVE_API, apiFetch } from "./api/client";
-
-interface WorkspaceSummary {
-  id: string;
-  name: string;
-}
+import { listMyWorkspaces, type WorkspaceOut } from "./api/auth";
+import { IS_LIVE_API } from "./api/client";
 
 export function useWorkspaceId(): string | null {
   const { getToken, isSignedIn } = useAuth();
@@ -36,10 +32,9 @@ export function useWorkspaceId(): string | null {
 
   // React Query handles caching + dedup so every page calling this hook
   // hits the endpoint at most once per session.
-  const { data } = useQuery<WorkspaceSummary[]>({
+  const { data } = useQuery<WorkspaceOut[]>({
     queryKey: ["my-workspaces"],
-    queryFn: () =>
-      apiFetch<WorkspaceSummary[]>("/auth/me/workspaces", { getToken }),
+    queryFn: () => listMyWorkspaces(getToken),
     // Skip the fetch entirely when offline mode is on or the user isn't
     // signed in — there's no JWT to authenticate the call anyway.
     enabled: IS_LIVE_API && !!isSignedIn && !fromEnv,

@@ -1,10 +1,12 @@
 "use client";
 import React, { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import {
   FileText, Zap, TrendingUp, Activity, Database,
   Clock, AlertTriangle, BarChart3, PieChart as PieChartIcon,
-  ArrowRight, Sparkles, Shield, RefreshCw,
+  ArrowRight, Sparkles, Shield, RefreshCw, AlertCircle,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -15,10 +17,20 @@ import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  IS_LIVE_API,
+  getWorkspaceStats,
+  getPipelineHealth,
+  type DocumentStats,
+  type PipelineHealthResponse,
+  type PipelineStageStatus,
+} from "@/lib/api";
 import {
   mockRevenueData, mockQueryVolumeData, mockDocTypeData, mockAlerts, mockDocuments,
 } from "@/lib/mock-data";
-import { cn, relativeTime, truncate } from "@/lib/utils";
+import { cn, formatNumber, relativeTime, truncate } from "@/lib/utils";
+import { useWorkspaceId } from "@/lib/use-workspace";
 
 /* ── Recharts custom tooltip ───────────────────────────────── */
 function CustomTooltip({ active, payload, label }: any) {
@@ -100,39 +112,100 @@ function ActivityFeed() {
   );
 }
 
-/* ── RAG pipeline status ───────────────────────────────────── */
-function PipelineStatus() {
-  const stages = [
-    { label: "S3 Ingestion", status: "live", latency: "12ms" },
-    { label: "SQS Queue", status: "live", latency: "0 pending" },
-    { label: "Lambda Embed", status: "live", latency: "340ms avg" },
-    { label: "Pinecone Index", status: "live", latency: "8ms p99" },
-    { label: "GPT-4o LLM", status: "live", latency: "1.2s avg" },
-  ];
+/* ── RAG pipeline status ─────────────────────────────────────
+ * Renders /analytics/pipeline output when live. Falls back to a
+ * hard-coded "all green" mock in dev mode (IS_LIVE_API=false) so
+ * the dashboard still looks alive when the backend is down.
+ */
+const MOCK_STAGES: PipelineStageStatus[] = [
+  { stage: "PostgreSQL",   status: "ok", latency_ms: 12,   detail: null },
+  { stage: "S3 Ingestion", status: "ok", latency_ms: null, detail: "0 pending" },
+  { stage: "Embeddings",   status: "ok", latency_ms: 340,  detail: null },
+  { stage: "Qdrant",       status: "ok", latency_ms: 8,    detail: null },
+  { stage: "Groq LLM",     status: "ok", latency_ms: 1200, detail: null },
+];
+
+const STATUS_CHROME: Record<
+  PipelineStageStatus["status"],
+  { dot: string; ping: string; badge: "success" | "warning" | "destructive" | "secondary"; label: string }
+> = {
+  ok:             { dot: "bg-emerald-400", ping: "bg-emerald-400", badge: "success",     label: "Live" },
+  degraded:       { dot: "bg-amber-400",   ping: "bg-amber-400",   badge: "warning",     label: "Degraded" },
+  down:           { dot: "bg-red-500",     ping: "bg-red-500",     badge: "destructive", label: "Down" },
+  not_configured: { dot: "bg-slate-500",   ping: "bg-slate-500",   badge: "secondary",   label: "Not set" },
+  disabled:       { dot: "bg-slate-500",   ping: "bg-slate-500",   badge: "secondary",   label: "Disabled" },
+};
+
+function formatStageLatency(stage: PipelineStageStatus): string {
+  if (stage.latency_ms != null) return `${Math.round(stage.latency_ms)}ms`;
+  if (stage.detail) return stage.detail;
+  return "—";
+}
+
+function PipelineStatus({
+  stages,
+  isLoading,
+  isError,
+}: {
+  stages: PipelineStageStatus[];
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-9 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
+        <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="font-medium text-red-300">Pipeline status unavailable</p>
+          <p className="text-muted-foreground">Could not reach /analytics/pipeline.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
-      {stages.map((stage, i) => (
-        <motion.div
-          key={stage.label}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.08 }}
-          className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/[0.02] border border-white/[0.05]"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="relative">
-              <div className="w-2 h-2 rounded-full bg-emerald-400" />
-              <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-40" />
+      {stages.map((stage, i) => {
+        const chrome = STATUS_CHROME[stage.status] ?? STATUS_CHROME.not_configured;
+        const animate = stage.status === "ok";
+        return (
+          <motion.div
+            key={stage.stage}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.08 }}
+            className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/[0.02] border border-white/[0.05]"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <div className={cn("w-2 h-2 rounded-full", chrome.dot)} />
+                {animate && (
+                  <div className={cn("absolute inset-0 w-2 h-2 rounded-full animate-ping opacity-40", chrome.ping)} />
+                )}
+              </div>
+              <span className="text-xs font-medium">{stage.stage}</span>
             </div>
-            <span className="text-xs font-medium">{stage.label}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground font-mono">{stage.latency}</span>
-            <Badge variant="success" className="text-[9px] py-0 px-1.5">Live</Badge>
-          </div>
-        </motion.div>
-      ))}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground font-mono">
+                {formatStageLatency(stage)}
+              </span>
+              <Badge variant={chrome.badge} className="text-[9px] py-0 px-1.5">
+                {chrome.label}
+              </Badge>
+            </div>
+          </motion.div>
+        );
+      })}
     </div>
   );
 }
@@ -140,6 +213,56 @@ function PipelineStatus() {
 /* ── Main Dashboard ────────────────────────────────────────── */
 export default function DashboardPage() {
   const [revenueView, setRevenueView] = useState<"area" | "bar">("area");
+
+  // Live workspace context (Clerk-resolved). When IS_LIVE_API is false,
+  // we never even call the backend — the dashboard renders pure mocks.
+  const { getToken } = useAuth();
+  const workspaceId = useWorkspaceId();
+  const liveEnabled = IS_LIVE_API && Boolean(workspaceId);
+
+  const statsQuery = useQuery<DocumentStats>({
+    queryKey: ["dashboard", "stats", workspaceId],
+    queryFn: () => getWorkspaceStats(workspaceId!, getToken),
+    enabled: liveEnabled,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
+  const pipelineQuery = useQuery<PipelineHealthResponse>({
+    queryKey: ["dashboard", "pipeline"],
+    queryFn: () => getPipelineHealth(getToken),
+    enabled: IS_LIVE_API,                   // pipeline health doesn't need a workspace
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
+  // Mock fallbacks when live mode is off, the request errors, or a workspace
+  // hasn't been picked yet. Each card still has a sensible value.
+  const indexedDocs = statsQuery.data
+    ? statsQuery.data.indexed
+    : mockDocuments.filter((d) => d.status === "indexed").length;
+  const totalDocs = statsQuery.data?.total_documents ?? null;
+  const totalQueries = statsQuery.data ? statsQuery.data.total_queries : 1307;
+  const totalChunks = statsQuery.data ? statsQuery.data.total_chunks : null;
+  const failedDocs = statsQuery.data ? statsQuery.data.failed : null;
+  const activeAlerts = mockAlerts.filter((a) => !a.read).length;
+
+  const stagesForRender: PipelineStageStatus[] = pipelineQuery.data?.stages?.length
+    ? pipelineQuery.data.stages
+    : MOCK_STAGES;
+
+  // Pipeline header subtitle reflects the overall health when live.
+  const pipelineSubtitle = (() => {
+    if (!IS_LIVE_API) return "All systems operational";
+    if (pipelineQuery.isLoading) return "Checking…";
+    if (pipelineQuery.isError) return "Status unavailable";
+    switch (pipelineQuery.data?.overall) {
+      case "ok":       return "All systems operational";
+      case "degraded": return "Some services degraded";
+      case "down":     return "One or more services down";
+      default:         return "Status unknown";
+    }
+  })();
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -154,27 +277,33 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             title="Documents Indexed"
-            value={mockDocuments.filter(d => d.status === "indexed").length}
-            unit="files"
+            value={statsQuery.isLoading ? "…" : formatNumber(indexedDocs)}
+            unit={totalDocs != null ? `of ${formatNumber(totalDocs)}` : "files"}
             change={12.5}
             changeLabel="vs last week"
             icon={Database}
             index={0}
           />
           <StatCard
-            title="Queries Today"
-            value="1,307"
+            title={statsQuery.data ? "Total Queries" : "Queries Today"}
+            value={statsQuery.isLoading ? "…" : formatNumber(totalQueries)}
             change={18.3}
-            changeLabel="vs yesterday"
+            changeLabel={statsQuery.data ? "lifetime" : "vs yesterday"}
             icon={Zap}
             iconColor="text-blue-400"
             iconBg="bg-blue-500/10"
             index={1}
           />
           <StatCard
-            title="Avg Confidence"
-            value="94.2"
-            unit="%"
+            title={statsQuery.data ? "Total Chunks" : "Avg Confidence"}
+            value={
+              statsQuery.isLoading
+                ? "…"
+                : statsQuery.data
+                  ? formatNumber(totalChunks ?? 0)
+                  : "94.2"
+            }
+            unit={statsQuery.data ? "chunks" : "%"}
             change={1.8}
             changeLabel="vs last week"
             icon={TrendingUp}
@@ -183,8 +312,14 @@ export default function DashboardPage() {
             index={2}
           />
           <StatCard
-            title="Active Alerts"
-            value={mockAlerts.filter(a => !a.read).length}
+            title={statsQuery.data ? "Failed Documents" : "Active Alerts"}
+            value={
+              statsQuery.isLoading
+                ? "…"
+                : statsQuery.data
+                  ? formatNumber(failedDocs ?? 0)
+                  : activeAlerts
+            }
             change={-25}
             changeLabel="resolved"
             icon={AlertTriangle}
@@ -375,13 +510,27 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-semibold">RAG Pipeline</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">All systems operational</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{pipelineSubtitle}</p>
               </div>
-              <button className="text-muted-foreground hover:text-foreground transition-colors">
-                <RefreshCw className="w-3.5 h-3.5" />
+              <button
+                onClick={() => pipelineQuery.refetch()}
+                disabled={!IS_LIVE_API || pipelineQuery.isFetching}
+                className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                aria-label="Refresh pipeline status"
+              >
+                <RefreshCw
+                  className={cn(
+                    "w-3.5 h-3.5",
+                    pipelineQuery.isFetching && "animate-spin"
+                  )}
+                />
               </button>
             </div>
-            <PipelineStatus />
+            <PipelineStatus
+              stages={stagesForRender}
+              isLoading={IS_LIVE_API && pipelineQuery.isLoading}
+              isError={IS_LIVE_API && pipelineQuery.isError}
+            />
           </motion.div>
         </div>
 
