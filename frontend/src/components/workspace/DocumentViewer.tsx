@@ -2,27 +2,16 @@
 /**
  * Document viewer — Phase 4 Week 7 Day 5-7.
  *
- * "When a user clicks a citation in the sources panel, the PDF opens on
- *  the exact page with the relevant text highlighted."
+ * Bug 6 fix: react-pdf fetches the PDF URL directly from the browser; it
+ * cannot attach an Authorization header to that fetch, so a bare
+ * `/documents/{id}/file` URL always 401s against the Clerk-protected backend.
  *
- * Architecture
- * ────────────
- *   - Reads `activeSource` from useAppStore. When non-null the dialog
- *     opens; closing the dialog calls setActiveSource(null).
- *   - Renders the PDF with react-pdf. The pdfjs worker is loaded from
- *     unpkg so we don't need to ship the worker file ourselves.
- *   - When `IS_LIVE_API` is true, the file URL is the Phase 1 backend
- *     `/documents/{id}/file` endpoint. When false (the default
- *     mock-driven dev experience), we render a styled placeholder that
- *     still demonstrates the highlighting UX — important for demos
- *     without a backend.
- *   - After each page renders its text layer, lib/pdf-highlight.ts
- *     runs over the spans and adds the .phase4-cite-highlight class
- *     to anything matching the cited excerpt. The first matching span
- *     is scrolled into view.
- *
- * Page navigation, zoom, and a sticky "cited passage" header are all
- * here so the viewer feels like a real document reader.
+ * Fix: we fetch the bytes ourselves via apiFetch (which injects the Bearer
+ * token), create an object URL from the resulting Blob, and hand THAT to
+ * react-pdf. The object URL is revoked on unmount to avoid memory leaks.
+ * A "Open original" link in the toolbar still uses the raw endpoint URL so
+ * clicking it opens the browser's built-in PDF viewer via a new tab (which
+ * has the session cookie rather than a Bearer token — fine for inline view).
  */
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -41,7 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogTitle,
 } from "@/components/ui/dialog";
-import { IS_LIVE_API } from "@/lib/api/client";
+import { IS_LIVE_API, apiFetch } from "@/lib/api/client";
 import { getDocument, getDocumentFileUrl, type DocumentOut } from "@/lib/api/documents";
 import { highlightExcerpt } from "@/lib/pdf-highlight";
 import { cn } from "@/lib/utils";
@@ -99,6 +88,40 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
   const [scale, setScale] = useState(1.1);
   const pageContainerRef = useRef<HTMLDivElement>(null);
 
+  // Bug 6 fix: fetch the PDF bytes through apiFetch so the Bearer token is
+  // attached, then hand react-pdf a blob: URL instead of the raw API URL
+  // (which the browser fetches without any Authorization header → 401).
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [blobError, setBlobError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!IS_LIVE_API) return;
+    let revoked = false;
+    setBlobUrl(null);
+    setBlobError(null);
+    (async () => {
+      try {
+        const resp = await apiFetch<Response>(`/documents/${docId}/file`, {
+          raw: true,
+          getToken,
+        });
+        const blob = await resp.blob();
+        if (!revoked) setBlobUrl(URL.createObjectURL(blob));
+      } catch (err) {
+        if (!revoked)
+          setBlobError(err instanceof Error ? err.message : "Could not load PDF");
+      }
+    })();
+    return () => {
+      revoked = true;
+      setBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    };
+    // Re-fetch when the document changes (new citation click).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId]);
+
   // Reset page state when the user clicks a different source
   useEffect(() => {
     setPageNumber(initialPage);
@@ -130,6 +153,8 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
     });
   };
 
+  // fileUrl is only used for the "Open in new tab" external link button.
+  // The actual PDF rendering uses blobUrl (authenticated fetch above).
   const fileUrl = IS_LIVE_API ? getDocumentFileUrl(docId) : null;
 
   return (
@@ -256,9 +281,13 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
         ref={pageContainerRef}
         className="flex-1 min-h-0 overflow-auto rounded-lg bg-white/[0.02] border border-white/[0.07] p-4 flex items-start justify-center"
       >
-        {fileUrl ? (
+        {IS_LIVE_API && !blobUrl && !blobError ? (
+          <PdfLoading />
+        ) : IS_LIVE_API && blobError ? (
+          <PdfError message={blobError} />
+        ) : blobUrl ? (
           <Document
-            file={fileUrl}
+            file={blobUrl}
             onLoadSuccess={({ numPages: n }) => setNumPages(n)}
             loading={<PdfLoading />}
             error={<PdfError message="Could not load this PDF" />}
@@ -288,9 +317,11 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/[0.07] flex-shrink-0 text-[10px] text-muted-foreground">
         <span>
-          {fileUrl
-            ? "Live PDF · pdfjs (text layer enabled)"
-            : "Demo viewer · connect a backend to render real PDFs"}
+          {blobUrl
+            ? "Live PDF · authenticated fetch · pdfjs text layer enabled"
+            : IS_LIVE_API
+              ? "Fetching PDF…"
+              : "Demo viewer · connect a backend to render real PDFs"}
         </span>
         <span>
           Highlights produced by lib/pdf-highlight.ts (trigram matcher)

@@ -210,12 +210,14 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
                     document_id, vectors_upserted,
                 )
             except Exception as embed_exc:
-                # Embedding failure should NOT fail the whole pipeline.
-                # Document stays at CHUNKED — analyst can still browse chunks.
-                # Re-indexing can be triggered manually later.
+                # Embedding failure should NOT propagate further — the doc
+                # row has already been moved to FAILED inside
+                # embed_and_index_chunks (which uses a fresh DB session so
+                # the FAILED write survives a rollback of *this* one).
+                # Keep going so we still log the chunk count and exit cleanly.
                 log.error(
                     "Embedding/indexing failed for document_id=%s: %s — "
-                    "document stays at CHUNKED status",
+                    "document marked FAILED by embed_and_index_chunks",
                     document_id, embed_exc,
                 )
 
@@ -698,6 +700,9 @@ async def update_document(
         doc.fiscal_period = body.fiscal_period
 
     db.add(doc)
+    await db.flush()    # surface constraint violations immediately
+    await db.commit()   # Bug 1 fix: metadata was never written to Postgres
+    await db.refresh(doc)
     return DocumentOut.model_validate(doc)
 
 
@@ -739,7 +744,8 @@ async def delete_document(
         except Exception as exc:
             log.warning("Storage delete failed for key %r: %s", s3_key, exc)
 
-    # ── Delete Pinecone vectors (best-effort) ─────────────────────────────────
+    # ── Delete Qdrant vectors (best-effort) ───────────────────────────────────
+    # Bug 2 fix: label said "Pinecone" but the embedder now calls Qdrant.
     if chunk_count > 0:
         try:
             from app.services.document.embedder import delete_document_vectors
@@ -749,7 +755,7 @@ async def delete_document(
                 chunk_count=chunk_count,
             )
         except Exception as exc:
-            log.warning("Pinecone vector delete failed for %s: %s", document_id, exc)
+            log.warning("Qdrant vector delete failed for %s: %s", document_id, exc)
 
     # ── Delete DB row (cascades to chunks) ────────────────────────────────────
     await db.delete(doc)

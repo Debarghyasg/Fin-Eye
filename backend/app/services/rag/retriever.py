@@ -119,21 +119,31 @@ async def _enrich_with_db(
     candidates: list[dict[str, Any]],
     db: "AsyncSession",
 ) -> list[dict[str, Any]]:
-    """Attach full chunk text + DB id to each Qdrant hit.
+    """Attach full chunk text + DB id + parent document name to each Qdrant hit.
 
     Hits whose ``pinecone_id`` no longer matches a Postgres row are dropped
     (the chunk was deleted between index time and query time).
+
+    The parent ``Document.original_filename`` is loaded in the same query
+    so the LLM generator can produce human-readable citations like
+    ``[1] Apple_10K_2023.pdf p.23`` instead of opaque ``Document-a3b1c2d4``.
     """
-    from app.db.models import Chunk
+    from app.db.models import Chunk, Document
 
     if not candidates:
         return []
 
     point_ids = [c["chunk_id"] for c in candidates]
     rows = (await db.execute(
-        select(Chunk).where(Chunk.pinecone_id.in_(point_ids))
-    )).scalars().all()
-    by_point_id = {row.pinecone_id: row for row in rows}
+        select(Chunk, Document.original_filename)
+        .join(Document, Document.id == Chunk.document_id)
+        .where(Chunk.pinecone_id.in_(point_ids))
+    )).all()
+    # Bug 10 fix: SQLAlchemy returns Row(Chunk, str) tuples. The previous code
+    # accessed row.Chunk and row.original_filename which only works when the
+    # columns are mapped by name; the scalar column (original_filename) is
+    # accessible as row[1], not as an attribute on the Row object.
+    by_point_id: dict[str, tuple] = {row[0].pinecone_id: row for row in rows}
 
     enriched: list[dict[str, Any]] = []
     for cand in candidates:
@@ -144,17 +154,18 @@ async def _enrich_with_db(
                 cand["chunk_id"],
             )
             continue
+        chunk: Chunk = row[0]
+        original_filename: str = row[1]
         enriched.append({
-            "chunk_id":       row.id,
+            "chunk_id":       chunk.id,
             "qdrant_id":      cand["chunk_id"],
-            # ``chroma_id`` kept for backward compatibility with existing
-            # consumers (re-ranker, generator) that already speak that key.
             "chroma_id":      cand["chunk_id"],
-            "document_id":    row.document_id,
-            "text":           row.text,
-            "chunk_type":     row.chunk_type,
-            "page_number":    row.page_number,
-            "source_section": row.source_section,
+            "document_id":    chunk.document_id,
+            "document_name":  original_filename,
+            "text":           chunk.text,
+            "chunk_type":     chunk.chunk_type,
+            "page_number":    chunk.page_number,
+            "source_section": chunk.source_section,
             "rrf_score":      cand["rrf_score"],
             "dense_score":    cand["dense_score"],
             "sparse_score":   cand["sparse_score"],
