@@ -67,12 +67,22 @@ async def list_my_workspaces(
     )
     workspaces = result.scalars().all()
 
-    # Enrich with document_count — a simple subquery would be cleaner in Week 3
+    # Bug 3 fix: count documents with a proper aggregate query instead of
+    # accessing ws.documents (lazy relationship — raises MissingGreenlet in
+    # an async session) and remove the redundant second SELECT that fetched
+    # the same workspace row again for no reason.
+    from sqlalchemy import func
+    from app.db.models import Document as DocModel
+
+    count_rows = (await db.execute(
+        select(DocModel.workspace_id, func.count(DocModel.id).label("cnt"))
+        .where(DocModel.workspace_id.in_([ws.id for ws in workspaces]))
+        .group_by(DocModel.workspace_id)
+    )).all()
+    doc_counts = {r.workspace_id: r.cnt for r in count_rows}
+
     out: list[WorkspaceOut] = []
     for ws in workspaces:
-        doc_result = await db.execute(
-            select(Workspace).where(Workspace.id == ws.id)
-        )
         out.append(
             WorkspaceOut(
                 id=ws.id,
@@ -80,7 +90,7 @@ async def list_my_workspaces(
                 name=ws.name,
                 description=ws.description,
                 is_default=ws.is_default,
-                document_count=len(ws.documents) if ws.documents else 0,
+                document_count=doc_counts.get(ws.id, 0),
                 created_at=ws.created_at,
                 updated_at=ws.updated_at,
             )

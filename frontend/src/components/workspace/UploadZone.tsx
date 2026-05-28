@@ -249,7 +249,11 @@ export function UploadZone() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { "application/pdf": [".pdf"], "text/plain": [".txt"] },
+    accept: {
+      "application/pdf": [".pdf"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+      "text/plain": [".txt"],
+    },
     maxSize: 50 * 1024 * 1024,
   });
 
@@ -311,7 +315,7 @@ export function UploadZone() {
               10-Ks, earnings call transcripts, prospectuses, annual reports
             </p>
             <span className="inline-flex items-center px-3 py-1 rounded-full bg-fin-500/10 border border-fin-500/20 text-xs text-fin-300">
-              PDF up to 50 MB · S3 + KMS encrypted at rest
+              PDF · DOCX · TXT up to 50 MB · S3 + KMS encrypted at rest
             </span>
           </>
         )}
