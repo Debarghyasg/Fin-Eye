@@ -7,6 +7,7 @@
  *   GET    /documents/{id}          — single document
  *   GET    /documents/{id}/status   — polling endpoint for processing pipeline
  *   GET    /documents/{id}/chunks   — paginated chunks
+ *   GET    /documents/{id}/file     — raw bytes (inline or attachment)
  *   PATCH  /documents/{id}          — manual metadata correction
  *   DELETE /documents/{id}
  *
@@ -74,6 +75,37 @@ export interface PaginatedList<T> {
   page: number;
   page_size: number;
   has_next: boolean;
+}
+
+/**
+ * Mirrors backend ChunkOut (app/db/schemas.py).
+ *
+ * `chunk_type` is one of the values in app.db.models.ChunkType:
+ *   "text" | "table" | "section_header" | "list" | "footnote"
+ * It's typed loosely as `string` here so future enum additions on the
+ * backend don't immediately break the frontend build.
+ */
+export interface ChunkOut {
+  id: string;
+  document_id: string;
+  text: string;
+  chunk_type: string;
+  chunk_index: number;
+  page_number: number | null;
+  source_section: string | null;
+  table_header: string | null;
+  created_at: string;
+}
+
+/**
+ * Body for PATCH /documents/{id}. Every field is optional — only the
+ * keys the analyst wants to correct should be sent.
+ */
+export interface DocumentMetadataUpdate {
+  doc_type?: DocumentType;
+  company_name?: string | null;
+  ticker?: string | null;
+  fiscal_period?: string | null;
 }
 
 export async function listDocuments(
@@ -178,6 +210,47 @@ export async function deleteDocument(
   getToken?: GetTokenFn
 ): Promise<void> {
   await apiFetch(`/documents/${documentId}`, { method: "DELETE", getToken });
+}
+
+/**
+ * GET /documents/{id}/chunks — paginated list of extracted chunks.
+ *
+ * Used by the "Chunks" inspector dialog so analysts can verify what the
+ * extractor + chunker actually produced from their PDF (the input the RAG
+ * pipeline retrieves over). Useful for debugging "why didn't my query find
+ * X?" without round-tripping through the LLM.
+ */
+export async function listChunks(
+  documentId: string,
+  opts: { page?: number; page_size?: number; chunk_type?: string } = {},
+  getToken?: GetTokenFn
+): Promise<PaginatedList<ChunkOut>> {
+  return apiFetch<PaginatedList<ChunkOut>>(`/documents/${documentId}/chunks`, {
+    query: {
+      page: opts.page ?? 1,
+      page_size: opts.page_size ?? 50,
+      chunk_type: opts.chunk_type,
+    },
+    getToken,
+  });
+}
+
+/**
+ * PATCH /documents/{id} — update analyst-corrected metadata fields.
+ *
+ * The backend coerces ticker to uppercase and silently ignores any
+ * unrecognised keys, so we only send the four documented fields.
+ */
+export async function updateDocumentMetadata(
+  documentId: string,
+  body: DocumentMetadataUpdate,
+  getToken?: GetTokenFn
+): Promise<DocumentOut> {
+  return apiFetch<DocumentOut>(`/documents/${documentId}`, {
+    method: "PATCH",
+    json: body,
+    getToken,
+  });
 }
 
 /**
