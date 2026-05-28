@@ -1,15 +1,33 @@
 "use client";
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  FileText, Trash2, MoreVertical, ExternalLink,
-  CheckCircle2, Loader2, Clock, Tag, Database, Check,
-  Pencil,
-} from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Clock,
+  Database,
+  ExternalLink,
+  FileText,
+  Loader2,
+  MoreVertical,
+  Pencil,
+  Tag,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ApiError, IS_LIVE_API, deleteDocument } from "@/lib/api";
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import type { Document } from "@/store/useAppStore";
 import { useAppStore } from "@/store/useAppStore";
@@ -20,6 +38,9 @@ import {
 } from "@/lib/api/documents";
 import { ChunksDialog } from "./ChunksDialog";
 import { EditDocumentDialog } from "./EditDocumentDialog";
+
+import { DocumentChunksDialog } from "./DocumentChunksDialog";
+import { DocumentEditDialog } from "./DocumentEditDialog";
 
 const statusConfig = {
   indexed: { label: "Indexed", icon: CheckCircle2, color: "text-emerald-400" },
@@ -51,23 +72,18 @@ export interface DocumentCardProps {
  *   - Optional multi-select checkbox that toggles the doc in
  *     `selectedDocIds` so the QueryPanel can scope queries to a subset
  *
- * Wiring (audit follow-up):
- *   - "Delete" hits the real DELETE /documents/{id} endpoint when
- *     IS_LIVE_API is on, then updates the store. Mock mode still
- *     short-circuits to the in-memory remove.
- *   - "Edit metadata" opens EditDocumentDialog, which calls
- *     PATCH /documents/{id}.
- *   - "View chunks" opens ChunksDialog, which calls
- *     GET /documents/{id}/chunks.
- *   - "View PDF" opens GET /documents/{id}/file in a new tab when live;
- *     otherwise it activates the doc so the existing mock viewer can
- *     render the placeholder page.
+ * Wiring (PR follow-up):
+ *   - Menu "View PDF"      → opens the existing DocumentViewer via setActiveSource
+ *   - Menu "Edit metadata" → opens DocumentEditDialog (PATCH /documents/{id})
+ *   - Menu "View chunks"   → opens DocumentChunksDialog (GET /documents/{id}/chunks)
+ *   - Menu "Delete"        → confirm dialog → DELETE /documents/{id}
  */
 export function DocumentCard({ doc, onClick, active = false, selectable = false }: DocumentCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [chunksOpen, setChunksOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [chunksOpen, setChunksOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const removeDocument = useAppStore((s) => s.removeDocument);
   const setActiveSource = useAppStore((s) => s.setActiveSource);
@@ -83,58 +99,38 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
   const isProcessing = doc.status === "processing";
   const processingPct = doc.processingProgress ?? 0;
 
-  const handleDelete = async () => {
-    setMenuOpen(false);
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
 
-    // Live mode: call the backend first so Postgres + S3 + Qdrant all
-    // drop the document. Only after the API succeeds do we touch the
-    // store, otherwise a 404 in the FE could mask a real backend error.
-    if (IS_LIVE_API) {
-      // eslint-disable-next-line no-alert
-      const confirmed = window.confirm(
-        `Delete "${doc.name}"? This removes it from the database, object storage and the vector index.`
-      );
-      if (!confirmed) return;
-
-      setDeleting(true);
-      try {
-        await apiDeleteDocument(doc.id, getToken);
-        removeDocument(doc.id);
-        queryClient.invalidateQueries({ queryKey: ["documents"] });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error("[DocumentCard] delete failed", err);
-        // eslint-disable-next-line no-alert
-        window.alert(
-          `Could not delete this document: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      } finally {
-        setDeleting(false);
+  // ── Delete mutation ──────────────────────────────────────────────────
+  // Was previously fire-and-forget on the local store only (the
+  // `deleteDocument` API client was declared but never invoked). Now it
+  // hits DELETE /documents/{id}, then prunes the local store + cache so
+  // the workspace card list updates without a re-fetch round-trip.
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!IS_LIVE_API) {
+        // Mock mode: just drop the local store row.
+        return undefined;
       }
-      return;
-    }
-
-    // Mock mode: just drop it from the store.
-    removeDocument(doc.id);
-  };
-
-  const handleViewPdf = () => {
-    setMenuOpen(false);
-    if (IS_LIVE_API) {
-      // Open the raw bytes in a new tab. The /file endpoint defaults to
-      // inline disposition so the browser PDF viewer renders directly.
-      window.open(getDocumentFileUrl(doc.id), "_blank", "noopener,noreferrer");
-    } else {
-      // Mock fallback: activate the in-app viewer with a synthetic source.
-      setActiveSource({
-        docId: doc.id,
-        page: 1,
-        excerpt: "Open the document at page 1 (mock viewer).",
-      });
-    }
-  };
+      await deleteDocument(doc.id, getToken);
+    },
+    onSuccess: () => {
+      removeDocument(doc.id);
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.removeQueries({ queryKey: ["document", doc.id] });
+      queryClient.removeQueries({ queryKey: ["document-chunks", doc.id] });
+      setConfirmOpen(false);
+      setMenuOpen(false);
+    },
+    onError: (err: unknown) => {
+      setDeleteError(
+        err instanceof ApiError
+          ? err.message
+          : (err as Error)?.message ?? "Delete failed.",
+      );
+    },
+  });
 
   return (
     <>
@@ -152,7 +148,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
             : isSelected
               ? "border-fin-500/30 bg-fin-500/5"
               : "border-white/[0.07] bg-card hover:border-white/[0.14] hover:bg-white/[0.03]",
-          deleting && "opacity-60 pointer-events-none"
         )}
       >
         {/* Active glow edge */}
@@ -168,13 +163,17 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
             <div
               className={cn(
                 "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors",
-                active || isSelected ? "bg-fin-500/20" : "bg-white/[0.05] group-hover:bg-fin-500/10"
+                active || isSelected
+                  ? "bg-fin-500/20"
+                  : "bg-white/[0.05] group-hover:bg-fin-500/10",
               )}
             >
               <FileText
                 className={cn(
                   "w-5 h-5 transition-colors",
-                  active || isSelected ? "text-fin-400" : "text-muted-foreground group-hover:text-fin-400"
+                  active || isSelected
+                    ? "text-fin-400"
+                    : "text-muted-foreground group-hover:text-fin-400",
                 )}
               />
             </div>
@@ -213,7 +212,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                   "w-5 h-5 rounded-md border flex items-center justify-center transition-all",
                   isSelected
                     ? "bg-fin-500 border-fin-500 text-white"
-                    : "border-white/15 hover:border-fin-500/60 group-hover:border-white/30"
+                    : "border-white/15 hover:border-fin-500/60 group-hover:border-white/30",
                 )}
               >
                 {isSelected && <Check className="w-3 h-3" />}
@@ -240,43 +239,44 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                   className="absolute right-0 top-8 w-44 z-50 rounded-lg border border-white/10 bg-popover shadow-xl py-1"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    onClick={handleViewPdf}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                  >
-                    <ExternalLink className="w-3 h-3" /> View PDF
-                  </button>
-                  <button
+                  <MenuItem
+                    icon={ExternalLink}
+                    label="View PDF"
                     onClick={() => {
                       setMenuOpen(false);
-                      setChunksOpen(true);
+                      // Open the existing DocumentViewer dialog at page 1 with
+                      // an empty excerpt — the highlight overlay treats that
+                      // as a no-op, so the user sees the bare page.
+                      setActiveSource({ docId: doc.id, page: 1, excerpt: "" });
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                  >
-                    <Database className="w-3 h-3" /> View chunks
-                  </button>
-                  <button
+                  />
+                  <MenuItem
+                    icon={Pencil}
+                    label="Edit metadata"
                     onClick={() => {
                       setMenuOpen(false);
                       setEditOpen(true);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                  >
-                    <Pencil className="w-3 h-3" /> Edit metadata
-                  </button>
-                  <div className="my-1 h-px bg-white/[0.06]" />
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {deleting ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-3 h-3" />
-                    )}
-                    {deleting ? "Deleting…" : "Delete"}
-                  </button>
+                  />
+                  <MenuItem
+                    icon={Database}
+                    label="View chunks"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setChunksOpen(true);
+                    }}
+                  />
+                  <div className="my-1 border-t border-white/[0.05]" />
+                  <MenuItem
+                    icon={Trash2}
+                    label="Delete"
+                    danger
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setDeleteError(null);
+                      setConfirmOpen(true);
+                    }}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -316,7 +316,9 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
             />
             <span className={cn("text-xs", cfg.color)}>{cfg.label}</span>
             {doc.status === "indexed" && (
-              <span className="text-xs text-muted-foreground">· {(doc.confidence * 100).toFixed(0)}% conf.</span>
+              <span className="text-xs text-muted-foreground">
+                · {(doc.confidence * 100).toFixed(0)}% conf.
+              </span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -341,20 +343,125 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
         )}
       </motion.div>
 
-      {/* Chunks inspector — calls GET /documents/{id}/chunks on demand */}
-      <ChunksDialog
-        documentId={doc.id}
-        documentName={doc.name}
-        open={chunksOpen}
-        onOpenChange={setChunksOpen}
-      />
-
-      {/* Metadata editor — calls PATCH /documents/{id} on submit */}
-      <EditDocumentDialog
-        doc={doc}
+      {/* ── Dialogs ────────────────────────────────────────────────────── */}
+      <DocumentEditDialog
         open={editOpen}
         onOpenChange={setEditOpen}
+        documentId={doc.id}
+      />
+      <DocumentChunksDialog
+        open={chunksOpen}
+        onOpenChange={setChunksOpen}
+        documentId={doc.id}
+        documentName={doc.name}
+      />
+      <DeleteConfirmDialog
+        open={confirmOpen}
+        onOpenChange={(o) => {
+          setConfirmOpen(o);
+          if (!o) setDeleteError(null);
+        }}
+        document={doc}
+        isPending={deleteMutation.isPending}
+        error={deleteError}
+        onConfirm={() => deleteMutation.mutate()}
       />
     </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Subcomponents
+ * ────────────────────────────────────────────────────────────────── */
+
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  danger,
+}: {
+  icon: React.ElementType;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors",
+        danger
+          ? "text-red-400 hover:bg-red-500/10"
+          : "text-muted-foreground hover:text-foreground hover:bg-white/5",
+      )}
+    >
+      <Icon className="w-3 h-3" /> {label}
+    </button>
+  );
+}
+
+interface DeleteConfirmDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  document: Document;
+  isPending: boolean;
+  error: string | null;
+  onConfirm: () => void;
+}
+
+function DeleteConfirmDialog({
+  open,
+  onOpenChange,
+  document,
+  isPending,
+  error,
+  onConfirm,
+}: DeleteConfirmDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            Delete document?
+          </DialogTitle>
+          <DialogDescription>
+            This permanently removes <span className="text-foreground">{document.name}</span>{" "}
+            and all of its extracted chunks from the workspace. The vector index entries
+            and stored file are deleted too. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        {error && (
+          <div className="flex items-start gap-2 py-2 px-3 rounded-md bg-red-500/5 border border-red-500/20 text-xs">
+            <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+            <span className="text-red-300">{error}</span>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-xs"
+            onClick={() => onOpenChange(false)}
+            disabled={isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="text-xs gap-1.5 bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-500/30"
+            onClick={onConfirm}
+            disabled={isPending}
+          >
+            {isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+            {isPending ? "Deleting…" : "Delete document"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
