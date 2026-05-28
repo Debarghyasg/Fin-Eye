@@ -1,16 +1,17 @@
 """
 Pydantic Settings — all configuration loaded from environment variables / .env file.
-100% free stack — no paid services required.
+100% free stack — no paid services, no Docker required.
 
-Free service map
-----------------
+Free service map (all run natively on Windows 11)
+-------------------------------------------------
   LLM          : Groq  (Llama 3.1 70B — 14,400 req/day free)
   Embeddings   : HuggingFace sentence-transformers/all-MiniLM-L6-v2  (local, CPU)
-  Vector store : ChromaDB  (runs in Docker, persistent on disk)
-  BM25 cache   : Redis  (in Docker)
-  File storage : Local filesystem  (Docker volume)
-  Queue        : In-process asyncio  (no SQS needed)
-  PII scan     : Regex fallback  (no Comprehend needed)
+  Vector store : Qdrant  (single .exe, listens on 6333)
+  BM25         : Qdrant native sparse vectors  (no separate service)
+  File storage : Local filesystem  (./uploads folder)
+  Queue        : Celery ALWAYS_EAGER=true  (inline, no broker needed)
+  PII scan     : Microsoft Presidio + spaCy  (local, no cloud)
+  Auth         : Clerk  (free tier)
 """
 from functools import lru_cache
 from typing import Literal
@@ -43,12 +44,14 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     # ── Database ──────────────────────────────────────────────────
+    # Local PostgreSQL 16 — install from https://www.postgresql.org/download/windows/
     DATABASE_URL: str = Field(
         default="postgresql+asyncpg://finsight:finsight_dev@localhost:5432/finsight",
     )
 
     @property
     def sync_database_url(self) -> str:
+        """Synchronous URL used by Alembic CLI."""
         return self.DATABASE_URL.replace(
             "postgresql+asyncpg://", "postgresql+psycopg2://"
         )
@@ -57,78 +60,79 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
 
-    # ── PostgreSQL (Docker Compose) ────────────────────────────────
+    # Used by alembic env.py only — not read at runtime
     POSTGRES_USER: str = "finsight"
     POSTGRES_PASSWORD: str = "finsight_dev"
     POSTGRES_DB: str = "finsight"
 
     # ── Clerk Auth ────────────────────────────────────────────────
+    # Get keys from https://dashboard.clerk.com → your app → API Keys
     CLERK_SECRET_KEY: str = ""
     CLERK_PUBLISHABLE_KEY: str = ""
     CLERK_JWKS_URL: str = "https://api.clerk.dev/v1/jwks"
     CLERK_JWT_AUDIENCE: str = ""
 
-    # ── FREE: Groq LLM ────────────────────────────────────────────
-    # Sign up free at https://console.groq.com
-    # Free tier: 14,400 requests/day, 6,000 tokens/min
+    # ── Groq LLM (free) ──────────────────────────────────────────
+    # Free key at https://console.groq.com — 14,400 req/day, 6,000 tok/min
     GROQ_API_KEY: str = Field(default="", description="gsk_... from console.groq.com")
-    GROQ_MODEL: str = "llama-3.1-70b-versatile"   # best free model
-    GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"  # faster fallback
+    GROQ_MODEL: str = "llama-3.1-70b-versatile"
+    GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
 
-    # ── OpenAI (for advanced financial intelligence features) ────────────────
-    # GPT-4o for structured financial metrics extraction and analysis
-    OPENAI_API_KEY: str = Field(default="", description="OpenAI API key for GPT-4o")
+    # ── OpenAI (optional — only for document comparison) ─────────
+    # Leave blank to use Groq as fallback for all features.
+    OPENAI_API_KEY: str = Field(default="", description="Optional — GPT-4o for comparisons")
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_FALLBACK_MODEL: str = "gpt-4o-mini"
 
-    # ── FREE: Local embeddings (HuggingFace) ──────────────────────
-    # No account, no API key — runs entirely on CPU in Docker
-    # Model downloads ~90 MB on first run, cached in /app/.cache
+    # ── Local embeddings (free, CPU only) ─────────────────────────
+    # Downloads ~90 MB on first run, cached in .cache/ automatically
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
-    EMBEDDING_DIMENSION: int = 384   # fixed for all-MiniLM-L6-v2
+    EMBEDDING_DIMENSION: int = 384
 
-    # ── FREE: Qdrant vector store (PDF §0) ───────────────────────────────────
-    # Runs as a service in Docker Compose, data persisted on disk.
-    # Production swap to Pinecone Serverless = change QDRANT_URL + QDRANT_API_KEY,
-    # no business-logic changes.
+    # ── Qdrant vector store ───────────────────────────────────────
+    # Download qdrant.exe from https://github.com/qdrant/qdrant/releases
+    # Run it with ./qdrant.exe — no config needed, listens on 6333
+    # Production swap: point QDRANT_URL at a Qdrant Cloud URL + set QDRANT_API_KEY
     QDRANT_URL: str = "http://localhost:6333"
-    QDRANT_API_KEY: str = ""                            # blank for local Qdrant
+    QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION: str = "finsight_chunks"
-    QDRANT_DENSE_VECTOR_NAME: str = "dense"             # named vector for dense embeddings
-    QDRANT_SPARSE_VECTOR_NAME: str = "sparse"           # named vector for BM25 sparse
-    QDRANT_SPARSE_MODEL: str = "Qdrant/bm25"            # fastembed sparse model id
+    QDRANT_DENSE_VECTOR_NAME: str = "dense"
+    QDRANT_SPARSE_VECTOR_NAME: str = "sparse"
+    QDRANT_SPARSE_MODEL: str = "Qdrant/bm25"
 
-    # Legacy ChromaDB settings — kept so existing .env files don't error out.
-    # The retriever no longer reads them; remove next major release.
+    # Legacy ChromaDB settings — kept so old .env files don't error out
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
     CHROMA_COLLECTION: str = "finsight_chunks"
 
-    # ── FREE: Redis (cache only — NOT a broker) ──────────────────
-    # Used for query-response caching, ticker-cache hot path, and session data.
-    # The BM25 index that used to live here is gone — Qdrant stores sparse vectors natively.
+    # ── Redis (cache only) ────────────────────────────────────────
+    # Install from https://github.com/microsoftarchive/redis/releases
+    # Used for response caching only — NOT as a Celery broker
     REDIS_URL: str = "redis://localhost:6379/0"
-    REDIS_BM25_TTL: int = 604800  # deprecated — kept so legacy .env files load
+    REDIS_BM25_TTL: int = 604800  # deprecated — kept so old .env files load
 
-    # ── FREE: RabbitMQ + Celery (durable async pipeline) ─────────
-    # Replaces FastAPI BackgroundTasks for document processing.
-    # Production swap: change CELERY_BROKER_URL to an AWS SQS URL.
-    CELERY_BROKER_URL: str = "amqp://finsight:finsight_dev@localhost:5672//"
-    CELERY_RESULT_BACKEND: str = "rpc://"               # in-broker results, no extra service
+    # ── Celery task queue ─────────────────────────────────────────
+    # CELERY_TASK_ALWAYS_EAGER=true  → recommended for local dev on Windows
+    #   Tasks run inline in the same process — no RabbitMQ needed at all.
+    #   Upload blocks until the document is fully indexed (~5-30s per PDF).
+    #
+    # CELERY_TASK_ALWAYS_EAGER=false → production / advanced local dev
+    #   Requires RabbitMQ running on localhost:5672.
+    #   Download from https://www.rabbitmq.com/install-windows.html
+    CELERY_BROKER_URL: str = "amqp://guest:guest@localhost:5672//"
+    CELERY_RESULT_BACKEND: str = "rpc://"
     CELERY_TASK_DEFAULT_QUEUE: str = "finsight"
-    CELERY_TASK_ALWAYS_EAGER: bool = False              # set True in tests to run inline
-    # Celery Beat schedule for the EDGAR poller. Disabled by default; enable
-    # by running `celery -A app.services.celery_app beat -l info` plus
-    # USE_EDGAR_POLLER=true.
+    CELERY_TASK_ALWAYS_EAGER: bool = True   # safe default for local dev
     EDGAR_POLLER_BEAT_NAME: str = "edgar-poll-every-hour"
 
-    # ── FREE: Local file storage ──────────────────────────────────
-    # Files stored on Docker volume instead of S3
-    # Set USE_S3=true to switch back to real S3 when ready
+    # ── Local file storage ────────────────────────────────────────
+    # Uploaded PDFs and extracted JSON saved here on your hard drive.
+    # The folder is created automatically if it does not exist.
     USE_S3: bool = False
-    LOCAL_STORAGE_PATH: str = "/app/uploads"
+    LOCAL_STORAGE_PATH: str = "./uploads"
 
-    # AWS (optional — only used when USE_S3=true)
+    # ── AWS (disabled by default) ─────────────────────────────────
+    # Only needed if you set USE_S3=true or USE_SQS=true
     AWS_REGION: str = "us-east-1"
     AWS_ACCESS_KEY_ID: str = "test"
     AWS_SECRET_ACCESS_KEY: str = "test"
@@ -136,76 +140,63 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: str = "finsight-documents"
     S3_PRESIGNED_URL_EXPIRY: int = 3600
 
-    # SQS (optional — tasks run in-process in free mode)
     USE_SQS: bool = False
-    SQS_DOCUMENT_QUEUE_URL: str = "http://localhost:4566/000000000000/finsight-documents"
+    SQS_DOCUMENT_QUEUE_URL: str = ""
 
-    # ── DynamoDB audit logging ────────────────────────────────────────────────
-    USE_DYNAMODB: bool = False  # Set to True to enable DynamoDB audit logging
+    # ── DynamoDB audit logging (disabled by default) ──────────────
+    USE_DYNAMODB: bool = False
     DYNAMODB_AUDIT_TABLE: str = "finsight-query-audit"
-    DYNAMODB_TTL_DAYS: int = 2555  # 7 years for SEC compliance (17a-4)
+    DYNAMODB_TTL_DAYS: int = 2555  # 7 years for SEC 17a-4 compliance
 
-    # ── Compliance: Fernet encryption at rest (PDF §10) ───────────────────────
-    # Generate a key once with:
+    # ── Fernet encryption at rest ─────────────────────────────────
+    # Optional in local dev. Generate a key with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    # Then paste it into .env. If left blank in dev, encryption is disabled
-    # (raw bytes stored). In production a key MUST be set.
+    # Leave blank to disable. Production MUST set a key.
     FERNET_KEY: str = ""
-    ENCRYPT_AT_REST: bool = True   # honoured only when FERNET_KEY is non-empty
+    ENCRYPT_AT_REST: bool = False   # only active when FERNET_KEY is set
 
-    # ── Compliance: Presidio PII scanner (PDF §0, §10) ────────────────────────
-    # When True (default), uses Microsoft Presidio + spaCy for 50+ entity types.
-    # On import failure (model missing, etc.) the service falls back to the
-    # built-in regex scanner so the upload pipeline never breaks.
+    # ── Presidio PII scanner ──────────────────────────────────────
+    # Needs spaCy model: python -m spacy download en_core_web_sm
+    # Falls back to regex scanner if Presidio fails to import.
     USE_PRESIDIO: bool = True
     PRESIDIO_LANGUAGE: str = "en"
-    PRESIDIO_MIN_SCORE: float = 0.5  # entities below this confidence are dropped
+    PRESIDIO_MIN_SCORE: float = 0.5
     PRESIDIO_SPACY_MODEL: str = "en_core_web_sm"
 
-    # ── Compliance: audit log retention (SEC Rule 17a-4) ──────────────────────
+    # ── Audit log retention (SEC Rule 17a-4) ──────────────────────
     AUDIT_LOG_RETENTION_YEARS: int = 7
 
-    # ── AWS SES email (Phase 3 — alerts) ─────────────────────────────────────
+    # ── Email ─────────────────────────────────────────────────────
+    # Leave SMTP_HOST blank → emails are logged to console only (safe default).
+    # To see emails: download MailHog (https://github.com/mailhog/MailHog/releases)
+    #   run MailHog_windows_amd64.exe, then set SMTP_HOST=localhost SMTP_PORT=1025
+    #   view captured emails at http://localhost:8025
     USE_SES: bool = False
     SES_FROM_ADDRESS: str = "alerts@finsight.local"
-    APP_URL: str = "http://localhost:3000"  # public dashboard URL used in email links
-
-    # ── Email backend (PR 3 — Mailhog dev SMTP / SES prod) ────────────────────
-    # Resolution order, first hit wins:
-    #   1. USE_SES=true              → AWS SES (production)
-    #   2. SMTP_HOST is non-empty    → SMTP (Mailhog in dev, Gmail/SES in prod)
-    #   3. neither                   → log-only (no email leaves the box)
-    # Mailhog has zero auth and listens on port 1025 in the docker-compose
-    # service of the same name. Web UI on http://localhost:8025.
+    APP_URL: str = "http://localhost:3000"
     SMTP_HOST: str = ""
     SMTP_PORT: int = 1025
     SMTP_USERNAME: str = ""
     SMTP_PASSWORD: str = ""
-    SMTP_USE_TLS: bool = False     # leave False for Mailhog; True for Gmail/Office365
-    EMAIL_FROM_ADDRESS: str = ""    # falls back to SES_FROM_ADDRESS if blank
+    SMTP_USE_TLS: bool = False
+    EMAIL_FROM_ADDRESS: str = ""
 
-    # ── Object storage backend toggle (PR 3 — SeaweedFS dev / S3 prod) ───────
-    # SeaweedFS speaks the S3 API, so it reuses the existing _S3Storage class.
-    # When ``USE_SEAWEEDFS=true`` (compose default) AWS_ENDPOINT_URL is
-    # overridden to point at the seaweedfs container and USE_S3 is forced
-    # true regardless of its declared value. To use real AWS S3 in prod, set
-    # USE_SEAWEEDFS=false + USE_S3=true and leave AWS_ENDPOINT_URL blank.
+    # ── SeaweedFS (disabled — use local storage instead) ──────────
     USE_SEAWEEDFS: bool = False
-    SEAWEEDFS_S3_ENDPOINT: str = "http://seaweedfs:8333"
+    SEAWEEDFS_S3_ENDPOINT: str = ""
 
-    # ── Observability (PR 3 — Prometheus + Grafana) ───────────────────────────
-    # When True, /metrics is exposed and Prometheus scrapes the FastAPI
-    # process. Grafana provisions a dashboard pointing at the Prometheus
-    # service (see infra/grafana/provisioning).
-    ENABLE_PROMETHEUS: bool = True
+    # ── Prometheus metrics (optional) ─────────────────────────────
+    # Set to false to save memory in local dev.
+    ENABLE_PROMETHEUS: bool = False
     PROMETHEUS_METRICS_PATH: str = "/metrics"
 
-    # ── SEC EDGAR poller (Phase 3 — proactive filings) ───────────────────────
+    # ── SEC EDGAR poller ──────────────────────────────────────────
     USE_EDGAR_POLLER: bool = False
-    EDGAR_POLL_INTERVAL_SECONDS: int = 3600  # 1 hour
-    EDGAR_USER_AGENT: str = "FinSight-AI/0.1 (contact@finsight.local)"  # SEC requires this
+    EDGAR_POLL_INTERVAL_SECONDS: int = 3600
+    EDGAR_USER_AGENT: str = "FinSight-AI/0.1 (contact@finsight.local)"
 
-    # ── Re-ranker (cross-encoder, local CPU) ──────────────────────
+    # ── Re-ranker ─────────────────────────────────────────────────
+    # ~85 MB download on first use, cached automatically
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANKER_TOP_N: int = 5
     RETRIEVER_TOP_K: int = 20
@@ -229,19 +220,15 @@ class Settings(BaseSettings):
             raise ValueError(f"LOG_LEVEL must be one of {allowed}")
         return v.upper()
 
-    # ── PR 3 helpers: SeaweedFS-aware S3 settings ─────────────────────────────
+    # ── Storage helpers ────────────────────────────────────────────
     @property
     def effective_use_s3(self) -> bool:
-        """True when the storage layer should use the S3 backend.
-
-        SeaweedFS speaks S3, so enabling it implicitly enables the S3
-        backend regardless of the ``USE_S3`` flag.
-        """
+        """True when the storage layer should use the S3 backend."""
         return self.USE_S3 or self.USE_SEAWEEDFS
 
     @property
     def effective_s3_endpoint_url(self) -> str | None:
-        """Endpoint URL boto3 should hit. SeaweedFS wins over manual override."""
+        """Endpoint URL boto3 should use."""
         if self.USE_SEAWEEDFS:
             return self.SEAWEEDFS_S3_ENDPOINT
         return self.AWS_ENDPOINT_URL
