@@ -76,15 +76,8 @@ psql --version
 3. Extract it → move `qdrant.exe` to **`C:\qdrant\qdrant.exe`**
 4. Verify later in step 9 (just run it to confirm it starts)
 
-### 1.6 Redis
-1. Go to **https://github.com/microsoftarchive/redis/releases**
-2. Download **`Redis-x64-3.0.504.msi`**
-3. Run the installer → tick **"Add Redis to the PATH"**
-4. Verify:
-```bash
-redis-cli ping
-# Expected: PONG
-```
+### 1.6 ~~Redis~~ — NOT NEEDED
+Redis was previously used as a BM25 cache. That layer was replaced by Qdrant's native sparse vectors. **You do not need to install Redis.** Skip this step entirely.
 
 ---
 
@@ -229,7 +222,7 @@ Expected: finishes with `added N packages` and no `ERROR` lines.
 
 ## 9. Start everything
 
-You need **4 Git Bash windows open at the same time**. Open them with  
+You only need **3 Git Bash windows**. Open them with
 **Start → Git Bash** (right-click the taskbar icon → New window).
 
 ### Window 1 — Qdrant
@@ -239,13 +232,7 @@ cd C:/qdrant
 ```
 ✅ Ready when you see: `Qdrant HTTP listening on 0.0.0.0:6333`
 
-### Window 2 — Redis
-```bash
-redis-server
-```
-✅ Ready when you see: `Ready to accept connections`
-
-### Window 3 — FastAPI backend
+### Window 2 — FastAPI backend
 ```bash
 cd C:/Fin-Eye/backend
 source .venv/Scripts/activate
@@ -253,7 +240,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 ✅ Ready when you see: `Application startup complete.`
 
-### Window 4 — Next.js frontend
+### Window 3 — Next.js frontend
 ```bash
 cd C:/Fin-Eye/frontend
 npm run dev
@@ -264,7 +251,7 @@ npm run dev
 
 ## 10. Verify the whole system works
 
-Run each check in a **5th Git Bash window** while the 4 servers above are running.
+Run each check in a **4th Git Bash window** while the 3 servers above are running.
 
 ### 10.1 — Qdrant is up
 ```bash
@@ -272,39 +259,33 @@ curl http://localhost:6333/
 # Expected JSON response with "title": "qdrant - vector search engine"
 ```
 
-### 10.2 — Redis is up
-```bash
-redis-cli ping
-# Expected: PONG
-```
-
-### 10.3 — PostgreSQL is up
+### 10.2 — PostgreSQL is up
 ```bash
 psql -U finsight -h localhost -d finsight -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';"
 # Expected: a number >= 10 (the migrated tables)
 ```
 
-### 10.4 — Backend health check
+### 10.3 — Backend health check
 ```bash
 curl http://localhost:8000/api/v1/analytics/health
 # Expected:
 # {"status":"ok","database":"ok","version":"0.1.0","environment":"development"}
 ```
 
-### 10.5 — Backend pipeline check
+### 10.4 — Backend pipeline check
 ```bash
 curl http://localhost:8000/api/v1/analytics/pipeline \
   -H "Authorization: Bearer test" 2>/dev/null | python -m json.tool
 # Expected: JSON with "overall" and a "stages" array listing PostgreSQL, Qdrant, Groq LLM etc.
 # Note: this endpoint requires auth — a 401 here is normal without a real JWT.
-# The health endpoint in 10.4 (no auth) is the true liveness check.
+# The health endpoint in 10.3 (no auth) is the true liveness check.
 ```
 
-### 10.6 — Frontend loads
+### 10.5 — Frontend loads
 Open **http://localhost:3000** in your browser.  
 ✅ You should see the Fin-Eye sign-in page (powered by Clerk).
 
-### 10.7 — Swagger API docs
+### 10.6 — Swagger API docs
 Open **http://localhost:8000/docs** in your browser.  
 ✅ You should see the interactive FastAPI Swagger UI listing all endpoints.
 
@@ -437,14 +418,13 @@ pytest tests/test_anomaly.py::test_z_score_high_severity -v
 
 Every time you want to work on the project:
 
-**Step 1** — Open 4 Git Bash windows and run one command in each:
+**Step 1** — Open 3 Git Bash windows and run one command in each:
 
 | Window | Command |
 |--------|---------|
 | 1 — Qdrant | `cd C:/qdrant && ./qdrant.exe` |
-| 2 — Redis | `redis-server` |
-| 3 — Backend | `cd C:/Fin-Eye/backend && source .venv/Scripts/activate && uvicorn app.main:app --reload --port 8000` |
-| 4 — Frontend | `cd C:/Fin-Eye/frontend && npm run dev` |
+| 2 — Backend | `cd C:/Fin-Eye/backend && source .venv/Scripts/activate && uvicorn app.main:app --reload --port 8000` |
+| 3 — Frontend | `cd C:/Fin-Eye/frontend && npm run dev` |
 
 **Step 2** — Open **http://localhost:3000** and start working.
 
@@ -493,7 +473,7 @@ netstat -ano | grep :8000
 # Kill it (replace 1234 with the actual PID)
 taskkill //PID 1234 //F
 ```
-Same approach for port 3000, 6333 (Qdrant), 6379 (Redis), 5432 (Postgres).
+Same approach for port 3000, 6333 (Qdrant), 5432 (Postgres).
 
 ### `No module named 'app'`
 You forgot to activate the virtual environment:
@@ -509,7 +489,7 @@ Or sign in to https://console.groq.com and check your usage.
 The PDF fetch goes through the backend API with a Bearer token. Make sure:
 1. You are signed in (not just on the page — actually authenticated via Clerk)
 2. The document status is **Indexed** (not processing)
-3. The backend (Window 3) is still running
+3. The backend (Window 2) is still running
 
 ---
 
@@ -522,5 +502,4 @@ The PDF fetch goes through the backend API with a Bearer token. Make sure:
 | Swagger docs | http://localhost:8000/docs | Interactive API explorer |
 | Health check | http://localhost:8000/api/v1/analytics/health | No auth required |
 | Qdrant UI | http://localhost:6333/dashboard | Vector store explorer |
-| Redis | localhost:6379 | No UI — use `redis-cli` |
 | PostgreSQL | localhost:5432 | Use pgAdmin or DBeaver to browse |
