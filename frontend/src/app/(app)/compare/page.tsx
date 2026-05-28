@@ -11,21 +11,28 @@
  * and progress steps so the demo experience matches the live one.
  */
 import React, { useEffect, useMemo, useState } from "react";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   TrendingUp, TrendingDown, Minus, ArrowRight, Sparkles,
   ChevronDown, FileText, RefreshCw, Download, Info,
   AlertTriangle, PlusCircle, MinusCircle, Edit3, AlertCircle,
+  History, Loader2, CheckCircle2, XCircle,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   IS_LIVE_API,
   ApiError,
   createComparison,
+  getComparison,
+  listComparisons,
   pollComparison,
+  type ComparisonListItem,
 } from "@/lib/api";
 import {
   adaptLiveComparison,
@@ -37,6 +44,7 @@ import {
 import { mockComparisonData } from "@/lib/mock-data";
 import { cn, sleep } from "@/lib/utils";
 import { useAppStore, type Document } from "@/store/useAppStore";
+import { useWorkspaceId } from "@/lib/use-workspace";
 
 /* ── Selector dropdown — now backed by the document store ──────────────── */
 interface DocSelectorProps {
@@ -306,6 +314,9 @@ const PROGRESS_STEPS_MOCK = [
 /* ── Main page ─────────────────────────────────────────────────────────── */
 export default function ComparePage() {
   const documents = useAppStore((s) => s.documents);
+  const workspaceId = useWorkspaceId();
+  const { getToken } = useAuth();
+  const liveEnabled = IS_LIVE_API && !!workspaceId;
 
   // Only indexed docs are eligible for comparison
   const indexedDocs = useMemo(
@@ -388,6 +399,62 @@ export default function ComparePage() {
       } else {
         setComparison(adaptLiveComparison(final));
       }
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? `${err.status}: ${err.message}`
+          : (err as Error).message;
+      setRunError(message);
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  /* ── Comparison history (GET /comparisons) ──────────────────────────── */
+  const historyQuery = useQuery<ComparisonListItem[]>({
+    queryKey: ["comparisons", workspaceId],
+    queryFn: () =>
+      listComparisons({ workspace_id: workspaceId!, limit: 20 }, getToken),
+    enabled: liveEnabled,
+    staleTime: 30_000,
+    // Poll while there's an in-flight comparison so the row flips from
+    // processing → completed without a manual refresh.
+    refetchInterval: (q) => {
+      const items = q.state.data;
+      const hasProcessing = items?.some((c) => c.status === "processing");
+      return hasProcessing ? 5_000 : false;
+    },
+  });
+
+  /**
+   * Load a previously-run comparison from history. If it's still
+   * processing we poll until it completes; otherwise we hit the cache-
+   * friendly GET and adapt it for the existing results UI.
+   */
+  const loadComparisonById = async (item: ComparisonListItem) => {
+    setRunError(null);
+    setIsRunning(true);
+
+    // Best-effort: rehydrate the doc selectors from the local store so the
+    // header chips stay in sync. The store may have evicted them since
+    // (e.g. another workspace), in which case we leave the selector blank.
+    const fromStore = (id: string) =>
+      documents.find((d) => d.id === id) ?? null;
+    const a = fromStore(item.document_a_id);
+    const b = fromStore(item.document_b_id);
+    if (a) setDocA(a);
+    if (b) setDocB(b);
+
+    try {
+      let result =
+        item.status === "processing"
+          ? await pollComparison(item.id, { getToken })
+          : await getComparison(item.id, getToken);
+
+      if (result.status === "failed") {
+        setRunError(result.error_message ?? "Comparison failed.");
+      }
+      setComparison(adaptLiveComparison(result));
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -544,6 +611,15 @@ export default function ComparePage() {
             )}
           </AnimatePresence>
         </motion.div>
+
+        {/* ── Comparison history rail ──────────────────────────────────── */}
+        <RecentComparisons
+          query={historyQuery}
+          documents={documents}
+          onSelect={loadComparisonById}
+          activeId={null}
+          liveEnabled={liveEnabled}
+        />
 
         {/* ── Results ───────────────────────────────────────────────────── */}
         <AnimatePresence>
@@ -823,5 +899,204 @@ export default function ComparePage() {
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * RecentComparisons — wires GET /api/v1/comparisons.
+ *
+ * Horizontal-scroll rail of the most recent 20 comparisons in the active
+ * workspace. Each chip links into the live result (re-using the existing
+ * results UI by feeding `getComparison` → `adaptLiveComparison`).
+ *
+ * In mock mode (or when no backend URL is set) the rail collapses into a
+ * one-line placeholder rather than disappearing entirely so analysts know
+ * the surface exists.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const STATUS_CHROME: Record<
+  string,
+  { icon: React.ElementType; classes: string; label: string }
+> = {
+  completed:  { icon: CheckCircle2, classes: "text-emerald-300 bg-emerald-500/10", label: "Done" },
+  processing: { icon: Loader2,      classes: "text-violet-300 bg-violet-500/10",   label: "Running" },
+  failed:     { icon: XCircle,      classes: "text-red-300 bg-red-500/10",         label: "Failed" },
+};
+
+function statusChrome(status: string) {
+  return STATUS_CHROME[status] ?? STATUS_CHROME.completed;
+}
+
+function RecentComparisons({
+  query,
+  documents,
+  onSelect,
+  activeId,
+  liveEnabled,
+}: {
+  query: UseQueryResult<ComparisonListItem[], Error>;
+  documents: Document[];
+  onSelect: (item: ComparisonListItem) => void;
+  activeId: string | null;
+  liveEnabled: boolean;
+}) {
+  const docMap = useMemo(() => {
+    const map = new Map<string, Document>();
+    documents.forEach((d) => map.set(d.id, d));
+    return map;
+  }, [documents]);
+
+  if (!liveEnabled) {
+    return (
+      <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-xs text-muted-foreground flex items-center gap-2">
+        <History className="w-3.5 h-3.5 text-fin-400" />
+        Connect a backend to load past comparisons. The full history rail
+        appears here once <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> is set.
+      </div>
+    );
+  }
+
+  const items = query.data ?? [];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="gradient-card p-4"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <History className="w-3.5 h-3.5 text-fin-400" />
+          <span className="text-sm font-semibold">Recent comparisons</span>
+          {query.data && (
+            <Badge variant="outline" className="text-[10px] py-0 px-1.5">
+              {query.data.length}
+            </Badge>
+          )}
+        </div>
+        <button
+          onClick={() => query.refetch()}
+          disabled={query.isFetching}
+          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+          aria-label="Refresh comparison history"
+        >
+          <RefreshCw className={cn("w-3.5 h-3.5", query.isFetching && "animate-spin")} />
+        </button>
+      </div>
+
+      {query.isLoading && (
+        <div className="flex gap-2 overflow-hidden">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-16 w-56 rounded-lg flex-shrink-0" />
+          ))}
+        </div>
+      )}
+
+      {query.isError && (
+        <div className="flex items-start gap-2 py-2 px-3 rounded-md bg-red-500/5 border border-red-500/20 text-xs">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+          <span className="text-red-300">
+            {(query.error as Error)?.message ?? "Could not load comparison history."}
+          </span>
+        </div>
+      )}
+
+      {!query.isLoading && !query.isError && items.length === 0 && (
+        <p className="text-xs text-muted-foreground py-3 text-center">
+          No comparisons yet — run one above to see it here.
+        </p>
+      )}
+
+      {items.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {items.map((item) => (
+            <ComparisonChip
+              key={item.id}
+              item={item}
+              docA={docMap.get(item.document_a_id) ?? null}
+              docB={docMap.get(item.document_b_id) ?? null}
+              active={item.id === activeId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function ComparisonChip({
+  item,
+  docA,
+  docB,
+  active,
+  onSelect,
+}: {
+  item: ComparisonListItem;
+  docA: Document | null;
+  docB: Document | null;
+  active: boolean;
+  onSelect: (item: ComparisonListItem) => void;
+}) {
+  const chrome = statusChrome(item.status);
+  const StatusIcon = chrome.icon;
+  const labelA = docA?.ticker ?? docA?.name ?? item.document_a_id.slice(0, 8);
+  const labelB = docB?.ticker ?? docB?.name ?? item.document_b_id.slice(0, 8);
+
+  return (
+    <button
+      onClick={() => onSelect(item)}
+      className={cn(
+        "flex-shrink-0 w-60 text-left rounded-lg border px-3 py-2.5 transition-all",
+        active
+          ? "border-fin-500/40 bg-fin-500/10"
+          : "border-white/[0.07] bg-white/[0.02] hover:border-fin-500/30 hover:bg-fin-500/5",
+      )}
+    >
+      <div className="flex items-center gap-2 mb-1.5">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium",
+            chrome.classes,
+          )}
+        >
+          <StatusIcon
+            className={cn("w-3 h-3", item.status === "processing" && "animate-spin")}
+          />
+          {chrome.label}
+        </span>
+        {item.overall_sentiment_shift && item.overall_sentiment_shift !== "stable" && (
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[9px] py-0 px-1.5",
+              item.overall_sentiment_shift === "positive"
+                ? "text-emerald-300 border-emerald-500/30"
+                : "text-red-300 border-red-500/30",
+            )}
+          >
+            {item.overall_sentiment_shift}
+          </Badge>
+        )}
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          {new Date(item.created_at).toLocaleDateString()}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1.5 text-xs font-medium truncate">
+        <span className="truncate">{labelA}</span>
+        <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+        <span className="truncate">{labelB}</span>
+      </div>
+
+      <p className="text-[10px] text-muted-foreground mt-1">
+        {item.metrics_with_significant_changes}/{item.total_metrics_compared} significant
+        {item.processing_time_ms != null && (
+          <span> · {(item.processing_time_ms / 1000).toFixed(1)}s</span>
+        )}
+      </p>
+    </button>
   );
 }
