@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import {
   LayoutDashboard, FileText, GitCompare, Bell, Settings,
-  ChevronLeft, ChevronRight, BarChart3,
+  ChevronLeft, ChevronRight, BarChart3, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -18,6 +18,7 @@ const navItems = [
   { label: "Compare", href: "/compare", icon: GitCompare },
   { label: "Analytics", href: "/analytics", icon: BarChart3 },
   { label: "Alerts", href: "/alerts", icon: Bell },
+  { label: "Audit", href: "/audit", icon: Shield },
 ];
 
 const bottomItems = [
