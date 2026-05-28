@@ -109,6 +109,31 @@ export interface UserAuditTrailResponse {
   generated_at: number;
 }
 
+/**
+ * Mirrors `HealthResponse` from backend/app/db/schemas.py. The `status`
+ * field is "ok" when the API + database are reachable, "degraded" when
+ * either is failing. Used by the Header dot indicator.
+ */
+export interface ApiHealthResponse {
+  status: "ok" | "degraded" | string;
+  database: string;
+  version: string;
+  environment: string;
+}
+
+/**
+ * GET /analytics/health — no-auth health probe.
+ *
+ * `getToken` is accepted for symmetry with the other helpers but is a
+ * no-op against this endpoint. The Header indicator polls this every
+ * 30 s; treat any non-2xx as a fault and render the "down" dot.
+ */
+export async function getApiHealth(
+  getToken?: GetTokenFn,
+): Promise<ApiHealthResponse> {
+  return apiFetch<ApiHealthResponse>("/analytics/health", { getToken });
+}
+
 export async function getWorkspaceStats(
   workspaceId: string,
   getToken?: GetTokenFn
