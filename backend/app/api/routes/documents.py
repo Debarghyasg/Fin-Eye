@@ -41,8 +41,10 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from urllib.parse import quote
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user, get_db
@@ -508,6 +510,125 @@ async def get_document_status(
         chunk_count=chunk_count,
         error_message=doc.error_message,
         updated_at=doc.updated_at,
+    )
+
+
+# ── GET /documents/{document_id}/file ────────────────────────────────────────
+@router.get(
+    "/{document_id}/file",
+    summary="Download or inline-render the original document bytes",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/pdf": {}, "application/octet-stream": {}},
+            "description": "Raw document bytes with the stored MIME type.",
+        },
+        404: {"description": "Document not found, or original bytes are unavailable."},
+    },
+)
+async def get_document_file(
+    document_id: str,
+    request: Request,
+    download: bool = Query(
+        default=False,
+        description=(
+            "When true, force a download dialog via Content-Disposition: attachment. "
+            "Default (false) sends inline so the browser/react-pdf can render it."
+        ),
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """
+    Stream the original uploaded document bytes back to the caller.
+
+    Why we always stream through the API rather than 302 to a presigned URL:
+      * SeaweedFS / LocalStack don't ship CORS headers by default — react-pdf's
+        `fetch` would be blocked on a redirect to those origins.
+      * Streaming through FastAPI keeps the audit trail in one place (every
+        download writes an audit row) and reuses the workspace-ownership
+        check in `_get_document_or_404`.
+      * Encryption-at-rest is transparently handled by `storage.download`.
+
+    For pure AWS deployments where bandwidth costs matter, swap this for a
+    `RedirectResponse(storage.generate_presigned_url(key))` — the FE will
+    follow it transparently.
+    """
+    doc = await _get_document_or_404(document_id, current_user, db)
+
+    if not doc.s3_key_original:
+        # Document row exists but the upload never made it to storage
+        # (FAILED before the s3 PUT, or pre-Phase-3 row).
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Original document bytes are not available for this document.",
+        )
+
+    try:
+        file_bytes = await asyncio.to_thread(storage.download, doc.s3_key_original)
+    except FileNotFoundError as exc:
+        log.warning(
+            "File missing for document_id=%s key=%s: %s",
+            document_id, doc.s3_key_original, exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stored document bytes are missing.",
+        ) from exc
+    except Exception as exc:
+        log.error(
+            "Storage download failed for document_id=%s: %s", document_id, exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Document storage temporarily unavailable.",
+        ) from exc
+
+    # RFC 5987 filename* keeps non-ASCII filenames intact in
+    # Content-Disposition without breaking older browsers that read `filename`.
+    safe_name = quote(doc.original_filename or f"{document_id}.bin", safe="")
+    disposition_kind = "attachment" if download else "inline"
+    disposition = f"{disposition_kind}; filename*=UTF-8''{safe_name}"
+
+    media_type = doc.mime_type or "application/octet-stream"
+
+    # Audit: every download is a SEC 17a-4 traceable event. We log even
+    # successful inline previews because the user is reading the source bytes.
+    try:
+        await record_audit_event(
+            db,
+            action="DOWNLOAD" if download else "VIEW",
+            resource_type="document",
+            resource_id=document_id,
+            user_id=current_user.id,
+            workspace_id=doc.workspace_id,
+            request=request,
+            status_code=status.HTTP_200_OK,
+            metadata={
+                "filename": doc.original_filename,
+                "mime_type": media_type,
+                "size_bytes": len(file_bytes),
+                "disposition": disposition_kind,
+            },
+        )
+    except Exception as audit_exc:
+        # Never let an audit-log failure break the download itself.
+        log.warning("Audit logging failed for file download: %s", audit_exc)
+
+    return Response(
+        content=file_bytes,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": disposition,
+            "Content-Length": str(len(file_bytes)),
+            # Short private cache so re-renders inside react-pdf are instant
+            # but a different user on the same machine (after sign-out) can't
+            # silently reuse the bytes.
+            "Cache-Control": "private, max-age=300",
+            # Belt-and-braces: tell the browser not to sniff. We send the
+            # MIME type the file was uploaded with.
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

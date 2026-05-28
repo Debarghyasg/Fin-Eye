@@ -25,20 +25,24 @@
  * here so the viewer feels like a real document reader.
  */
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import {
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2,
   Loader2, AlertCircle, BookOpen, FileText, ExternalLink, X,
+  ShieldCheck, ShieldAlert, ShieldQuestion,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogTitle,
 } from "@/components/ui/dialog";
 import { IS_LIVE_API } from "@/lib/api/client";
-import { getDocumentFileUrl } from "@/lib/api/documents";
+import { getDocument, getDocumentFileUrl, type DocumentOut } from "@/lib/api/documents";
 import { highlightExcerpt } from "@/lib/pdf-highlight";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -66,6 +70,28 @@ interface ViewerInnerProps {
 function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps) {
   const documents = useAppStore((s) => s.documents);
   const doc = documents.find((d) => d.id === docId);
+
+  // Pull the latest server-side metadata (status, page_count, PII scan,
+  // chunk-related fields). The list view stays optimistic — this query
+  // refreshes whatever the backend currently knows about the doc, so a
+  // citation opened minutes after upload reflects up-to-date status.
+  const { getToken } = useAuth();
+  const liveDocQuery = useQuery<DocumentOut>({
+    queryKey: ["document", docId],
+    queryFn: () => getDocument(docId, getToken),
+    enabled: IS_LIVE_API && Boolean(docId),
+    staleTime: 30_000,
+  });
+  const liveDoc = liveDocQuery.data ?? null;
+
+  const displayName =
+    liveDoc?.original_filename ?? doc?.name ?? docId;
+  const displayCompany =
+    liveDoc?.company_name ?? doc?.company ?? "";
+  const displayTicker =
+    liveDoc?.ticker ?? doc?.ticker ?? "";
+  const displayType =
+    liveDoc?.doc_type ?? doc?.type ?? "";
 
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [pageInputValue, setPageInputValue] = useState(String(initialPage));
@@ -114,13 +140,14 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
           <FileText className="w-4 h-4 text-fin-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <DialogTitle className="text-sm truncate">
-            {doc?.name ?? docId}
+          <DialogTitle className="text-sm truncate flex items-center gap-2">
+            <span className="truncate">{displayName}</span>
+            <PiiBadge piiPassed={liveDoc?.pii_scan_passed ?? null} />
           </DialogTitle>
           <p className="text-[11px] text-muted-foreground truncate">
-            {doc
-              ? `${doc.ticker ?? ""}${doc.ticker ? " · " : ""}${doc.company ?? ""} · ${doc.type ?? ""}`
-              : "Document"}
+            {[displayTicker, displayCompany, displayType, formatDocStats(liveDoc)]
+              .filter(Boolean)
+              .join(" · ") || "Document"}
           </p>
         </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close viewer">
@@ -250,7 +277,7 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
           </Document>
         ) : (
           <MockPdfPage
-            docName={doc?.name ?? "document.pdf"}
+            docName={displayName}
             excerpt={excerpt}
             pageNumber={pageNumber}
             scale={scale}
@@ -274,6 +301,50 @@ function ViewerInner({ docId, initialPage, excerpt, onClose }: ViewerInnerProps)
 }
 
 /* ── Loading + error states ────────────────────────────────────────────── */
+/**
+ * Compact PII / file-size summary string for the document subtitle.
+ * Returns "" when there's no live metadata so the join() above stays clean.
+ */
+function formatDocStats(doc: DocumentOut | null): string {
+  if (!doc) return "";
+  const parts: string[] = [];
+  if (doc.page_count != null) parts.push(`${doc.page_count} pages`);
+  if (doc.file_size_bytes) {
+    const mb = doc.file_size_bytes / (1024 * 1024);
+    parts.push(mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(doc.file_size_bytes / 1024)} KB`);
+  }
+  if (doc.fiscal_period) parts.push(doc.fiscal_period);
+  return parts.join(", ");
+}
+
+/**
+ * Renders a tiny shield badge reflecting the backend's PII scan verdict.
+ *  - true   → green "PII clean"
+ *  - false  → red "PII flagged" (compliance officers should review)
+ *  - null   → neutral grey "PII unknown" (scan hasn't run yet, or no live data)
+ */
+function PiiBadge({ piiPassed }: { piiPassed: boolean | null }) {
+  if (piiPassed === true) {
+    return (
+      <Badge variant="success" className="text-[9px] py-0 px-1.5 gap-1 flex-shrink-0">
+        <ShieldCheck className="w-3 h-3" /> PII clean
+      </Badge>
+    );
+  }
+  if (piiPassed === false) {
+    return (
+      <Badge variant="destructive" className="text-[9px] py-0 px-1.5 gap-1 flex-shrink-0">
+        <ShieldAlert className="w-3 h-3" /> PII flagged
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-[9px] py-0 px-1.5 gap-1 flex-shrink-0">
+      <ShieldQuestion className="w-3 h-3" /> PII unknown
+    </Badge>
+  );
+}
+
 function PdfLoading() {
   return (
     <div className="flex flex-col items-center justify-center text-muted-foreground py-16">

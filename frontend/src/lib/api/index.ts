@@ -10,6 +10,7 @@
 export * from "./client";
 export * from "./alerts";
 export * from "./analytics";
+export * from "./auth";
 export * from "./comparisons";
 export * from "./documents";
 export * from "./queries";

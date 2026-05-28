@@ -1,12 +1,36 @@
 "use client";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Shield, Key, Database, Bell, Users, CreditCard, ChevronRight } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Shield, Key, Database, Bell, ChevronRight,
+  User as UserIcon, Briefcase, Plus, CheckCircle2, AlertCircle, Loader2,
+} from "lucide-react";
+
 import { Header } from "@/components/layout/Header";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  IS_LIVE_API,
+  ApiError,
+  getMe,
+  updateMe,
+  listMyWorkspaces,
+  createWorkspace,
+  type UserOut,
+  type WorkspaceOut,
+} from "@/lib/api";
+import { cn, formatNumber } from "@/lib/utils";
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Static config sections — preserved from the original mock dashboard.
+ * These switches don't persist anywhere yet; they're a placeholder UI for
+ * security/AI/notification toggles that the backend will own later.
+ * ────────────────────────────────────────────────────────────────────────── */
 const sections = [
   {
     title: "Security & Compliance",
@@ -43,11 +67,403 @@ const sections = [
   },
 ];
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Profile section — wired to GET / PATCH /auth/me.
+ * ────────────────────────────────────────────────────────────────────────── */
+function ProfileCard() {
+  const { getToken, isSignedIn } = useAuth();
+  const liveEnabled = IS_LIVE_API && Boolean(isSignedIn);
+
+  const meQuery = useQuery<UserOut>({
+    queryKey: ["me"],
+    queryFn: () => getMe(getToken),
+    enabled: liveEnabled,
+    staleTime: 60_000,
+  });
+
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [feedback, setFeedback] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // Hydrate the form whenever the server response lands.
+  useEffect(() => {
+    if (meQuery.data) {
+      setFullName(meQuery.data.full_name ?? "");
+      setEmail(meQuery.data.email ?? "");
+    }
+  }, [meQuery.data]);
+
+  const queryClient = useQueryClient();
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateMe(
+        {
+          // Only send fields that actually changed; the backend treats
+          // missing fields as "don't touch".
+          full_name: fullName !== (meQuery.data?.full_name ?? "") ? fullName : undefined,
+          email:     email     !== (meQuery.data?.email ?? "")     ? email     : undefined,
+        },
+        getToken,
+      ),
+    onSuccess: (next) => {
+      queryClient.setQueryData(["me"], next);
+      setFeedback({ kind: "ok", text: "Profile updated." });
+    },
+    onError: (err: unknown) => {
+      const text =
+        err instanceof ApiError
+          ? `Update failed: ${err.message}`
+          : "Update failed.";
+      setFeedback({ kind: "err", text });
+    },
+  });
+
+  const isDirty =
+    !!meQuery.data &&
+    (fullName !== (meQuery.data.full_name ?? "") ||
+      email !== (meQuery.data.email ?? ""));
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="gradient-card p-5"
+    >
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400">
+          <UserIcon className="w-4 h-4" />
+        </div>
+        <h3 className="text-sm font-semibold">Profile</h3>
+        {liveEnabled && meQuery.isFetching && (
+          <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+        )}
+      </div>
+
+      {!liveEnabled && (
+        <p className="text-xs text-muted-foreground">
+          Sign in and set <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> to manage
+          your profile against a real backend.
+        </p>
+      )}
+
+      {liveEnabled && meQuery.isLoading && (
+        <div className="space-y-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      )}
+
+      {liveEnabled && meQuery.isError && (
+        <ProfileError detail={(meQuery.error as Error)?.message} />
+      )}
+
+      {liveEnabled && meQuery.data && (
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setFeedback(null);
+            saveMutation.mutate();
+          }}
+        >
+          <FieldRow label="Display name">
+            <Input
+              value={fullName}
+              maxLength={255}
+              placeholder="Jane Doe"
+              onChange={(e) => setFullName(e.target.value)}
+              className="h-9 text-xs"
+            />
+          </FieldRow>
+
+          <FieldRow label="Email">
+            <Input
+              type="email"
+              value={email}
+              placeholder="you@example.com"
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-9 text-xs"
+            />
+          </FieldRow>
+
+          <FieldRow label="Clerk user ID" muted>
+            <code className="text-[11px] text-muted-foreground font-mono break-all">
+              {meQuery.data.clerk_user_id}
+            </code>
+          </FieldRow>
+
+          <FieldRow label="Account created" muted>
+            <span className="text-xs text-muted-foreground">
+              {new Date(meQuery.data.created_at).toLocaleString()}
+            </span>
+          </FieldRow>
+
+          <div className="flex items-center justify-between pt-2 border-t border-white/[0.05]">
+            <FeedbackLine feedback={feedback} />
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!isDirty || saveMutation.isPending}
+              className="text-xs"
+            >
+              {saveMutation.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </motion.div>
+  );
+}
+
+function ProfileError({ detail }: { detail?: string }) {
+  return (
+    <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
+      <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+      <div>
+        <p className="font-medium text-red-300">Could not load profile</p>
+        <p className="text-muted-foreground">{detail ?? "Backend unavailable."}</p>
+      </div>
+    </div>
+  );
+}
+
+function FieldRow({
+  label,
+  children,
+  muted,
+}: {
+  label: string;
+  children: React.ReactNode;
+  muted?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-3 items-center">
+      <span
+        className={cn(
+          "text-[11px] uppercase tracking-wide font-medium",
+          muted ? "text-muted-foreground/70" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <div className="col-span-2">{children}</div>
+    </div>
+  );
+}
+
+function FeedbackLine({ feedback }: { feedback: { kind: "ok" | "err"; text: string } | null }) {
+  if (!feedback) return <span className="text-[11px] text-muted-foreground/70">—</span>;
+  if (feedback.kind === "ok") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-emerald-400">
+        <CheckCircle2 className="w-3 h-3" /> {feedback.text}
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-[11px] text-red-400">
+      <AlertCircle className="w-3 h-3" /> {feedback.text}
+    </span>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Workspaces section — wired to GET / POST /auth/me/workspaces.
+ * ────────────────────────────────────────────────────────────────────────── */
+function WorkspacesCard() {
+  const { getToken, isSignedIn } = useAuth();
+  const liveEnabled = IS_LIVE_API && Boolean(isSignedIn);
+  const queryClient = useQueryClient();
+
+  const wsQuery = useQuery<WorkspaceOut[]>({
+    queryKey: ["my-workspaces"],
+    queryFn: () => listMyWorkspaces(getToken),
+    enabled: liveEnabled,
+  });
+
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      createWorkspace(
+        {
+          name: newName.trim(),
+          description: newDescription.trim() || undefined,
+        },
+        getToken,
+      ),
+    onSuccess: (workspace) => {
+      // Optimistic merge — also bump the cache the workspace switcher reads.
+      queryClient.setQueryData<WorkspaceOut[] | undefined>(
+        ["my-workspaces"],
+        (prev) => (prev ? [...prev, workspace] : [workspace]),
+      );
+      setNewName("");
+      setNewDescription("");
+      setCreateError(null);
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError) {
+        setCreateError(err.message);
+      } else {
+        setCreateError((err as Error)?.message ?? "Failed to create workspace.");
+      }
+    },
+  });
+
+  const canSubmit = newName.trim().length > 0 && !createMutation.isPending;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="gradient-card p-5"
+    >
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-fin-500/10 text-fin-400">
+          <Briefcase className="w-4 h-4" />
+        </div>
+        <h3 className="text-sm font-semibold">Workspaces</h3>
+        {liveEnabled && wsQuery.isFetching && (
+          <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+        )}
+        <Badge variant="outline" className="ml-auto text-[10px] py-0 px-1.5">
+          {liveEnabled && wsQuery.data ? wsQuery.data.length : "—"} total
+        </Badge>
+      </div>
+
+      {!liveEnabled && (
+        <p className="text-xs text-muted-foreground mb-4">
+          Connect a backend to manage workspaces.
+        </p>
+      )}
+
+      {liveEnabled && wsQuery.isLoading && (
+        <div className="space-y-2">
+          {[0, 1].map((i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
+        </div>
+      )}
+
+      {liveEnabled && wsQuery.isError && (
+        <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs mb-3">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-red-300">Could not load workspaces</p>
+            <p className="text-muted-foreground">
+              {(wsQuery.error as Error)?.message ?? "Backend unavailable."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {liveEnabled && wsQuery.data && (
+        <div className="space-y-2 mb-4">
+          {wsQuery.data.length === 0 && (
+            <p className="text-xs text-muted-foreground py-3 text-center border border-dashed border-white/10 rounded-lg">
+              You don't have any workspaces yet.
+            </p>
+          )}
+          {wsQuery.data.map((ws, i) => (
+            <motion.div
+              key={ws.id}
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.04 }}
+              className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-white/[0.02] border border-white/[0.05]"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium truncate">{ws.name}</span>
+                  {ws.is_default && (
+                    <Badge variant="success" className="text-[9px] py-0 px-1.5">
+                      default
+                    </Badge>
+                  )}
+                </div>
+                {ws.description && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                    {ws.description}
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                  {formatNumber(ws.document_count)} document
+                  {ws.document_count === 1 ? "" : "s"} · created{" "}
+                  {new Date(ws.created_at).toLocaleDateString()}
+                </p>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {liveEnabled && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!canSubmit) return;
+            setCreateError(null);
+            createMutation.mutate();
+          }}
+          className="space-y-2 pt-3 border-t border-white/[0.05]"
+        >
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
+            New workspace
+          </p>
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Workspace name"
+            maxLength={255}
+            className="h-9 text-xs"
+          />
+          <Input
+            value={newDescription}
+            onChange={(e) => setNewDescription(e.target.value)}
+            placeholder="Description (optional)"
+            maxLength={1024}
+            className="h-9 text-xs"
+          />
+          <div className="flex items-center justify-between gap-3">
+            {createError ? (
+              <span className="flex items-center gap-1 text-[11px] text-red-400">
+                <AlertCircle className="w-3 h-3" /> {createError}
+              </span>
+            ) : (
+              <span className="text-[11px] text-muted-foreground/70">
+                Names must be unique per user.
+              </span>
+            )}
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!canSubmit}
+              className="text-xs gap-1.5"
+            >
+              <Plus className="w-3 h-3" />
+              {createMutation.isPending ? "Creating…" : "Create"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </motion.div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Page entry-point.
+ * ────────────────────────────────────────────────────────────────────────── */
 export default function SettingsPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Header title="Settings" subtitle="Workspace configuration and security" />
       <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-3xl">
+
+        <ProfileCard />
+        <WorkspacesCard />
+
         {sections.map((section, si) => {
           const Icon = section.icon;
           return (
@@ -85,7 +501,7 @@ export default function SettingsPage() {
           );
         })}
 
-        {/* API Keys */}
+        {/* API Keys (still mock — backend has no API-key model yet) */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
