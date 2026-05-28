@@ -69,6 +69,46 @@ export interface TokenUsageResponse {
   error?: string;
 }
 
+/**
+ * Mirrors the wrapper response from
+ *   GET /api/v1/analytics/audit/user/{target_user_id}
+ *
+ * Note: the backend's `audit_trail` payload is mostly a placeholder today —
+ * `postgres_logs` is always empty pending the DB query implementation, and
+ * `dynamodb_logs` only populates when USE_DYNAMODB=true. We model the shape
+ * faithfully so the UI can degrade gracefully and surface a "no data" state
+ * without us having to refactor the type later.
+ */
+export interface UserAuditTrailEntry {
+  /** Free-form fields — DynamoDB items have many shapes across migrations. */
+  query_log_id?: string;
+  workspace_id?: string;
+  query_text?: string;
+  answer_text?: string;
+  confidence_score?: number;
+  latency_ms?: number;
+  model_used?: string;
+  total_tokens?: number;
+  /** Allow unknown extra keys without losing autocomplete on the known ones. */
+  [key: string]: unknown;
+}
+
+export interface UserAuditTrailResponse {
+  target_user_id: string;
+  requested_by: string;
+  date_range: { start: string | null; end: string | null };
+  limit: number;
+  audit_trail: {
+    user_id: string;
+    postgres_logs: UserAuditTrailEntry[];
+    dynamodb_logs: UserAuditTrailEntry[];
+    total_entries: number;
+  };
+  compliance_note: string;
+  /** Unix-epoch seconds. */
+  generated_at: number;
+}
+
 export async function getWorkspaceStats(
   workspaceId: string,
   getToken?: GetTokenFn
@@ -110,4 +150,34 @@ export async function getTokenUsage(
     query: { days },
     getToken,
   });
+}
+
+/**
+ * GET /analytics/audit/user/{target_user_id}
+ *
+ * Backend currently enforces self-access only (`target_user_id` must equal
+ * the calling user's UUID). Pass the User UUID — NOT the Clerk user id.
+ * Resolve the UUID via `getMe()` before calling this.
+ */
+export async function getUserAuditAnalytics(
+  targetUserId: string,
+  opts: {
+    /** ISO yyyy-mm-dd, inclusive lower bound. */
+    startDate?: string;
+    /** ISO yyyy-mm-dd, inclusive upper bound. */
+    endDate?: string;
+    /** Hard cap on rows returned across both stores; backend max is 1000. */
+    limit?: number;
+  } = {},
+  getToken?: GetTokenFn,
+): Promise<UserAuditTrailResponse> {
+  const query: Record<string, string | number | undefined> = {
+    limit: opts.limit ?? 100,
+  };
+  if (opts.startDate) query.start_date = opts.startDate;
+  if (opts.endDate) query.end_date = opts.endDate;
+  return apiFetch<UserAuditTrailResponse>(
+    `/analytics/audit/user/${targetUserId}`,
+    { query, getToken },
+  );
 }
