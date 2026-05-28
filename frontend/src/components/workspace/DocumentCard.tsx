@@ -31,6 +31,13 @@ import { ApiError, IS_LIVE_API, deleteDocument } from "@/lib/api";
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import type { Document } from "@/store/useAppStore";
 import { useAppStore } from "@/store/useAppStore";
+import { IS_LIVE_API } from "@/lib/api/client";
+import {
+  deleteDocument as apiDeleteDocument,
+  getDocumentFileUrl,
+} from "@/lib/api/documents";
+import { ChunksDialog } from "./ChunksDialog";
+import { EditDocumentDialog } from "./EditDocumentDialog";
 
 import { DocumentChunksDialog } from "./DocumentChunksDialog";
 import { DocumentEditDialog } from "./DocumentEditDialog";
@@ -83,6 +90,9 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
   const selectedDocIds = useAppStore((s) => s.selectedDocIds);
   const toggleSelectedDoc = useAppStore((s) => s.toggleSelectedDoc);
   const isSelected = selectedDocIds.includes(doc.id);
+
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
 
   const cfg = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.processing;
   const StatusIcon = cfg.icon;

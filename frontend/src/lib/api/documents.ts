@@ -7,6 +7,7 @@
  *   GET    /documents/{id}          — single document
  *   GET    /documents/{id}/status   — polling endpoint for processing pipeline
  *   GET    /documents/{id}/chunks   — paginated chunks
+ *   GET    /documents/{id}/file     — raw bytes (inline or attachment)
  *   PATCH  /documents/{id}          — manual metadata correction
  *   DELETE /documents/{id}
  *
@@ -250,6 +251,47 @@ export async function deleteDocument(
   getToken?: GetTokenFn
 ): Promise<void> {
   await apiFetch(`/documents/${documentId}`, { method: "DELETE", getToken });
+}
+
+/**
+ * GET /documents/{id}/chunks — paginated list of extracted chunks.
+ *
+ * Used by the "Chunks" inspector dialog so analysts can verify what the
+ * extractor + chunker actually produced from their PDF (the input the RAG
+ * pipeline retrieves over). Useful for debugging "why didn't my query find
+ * X?" without round-tripping through the LLM.
+ */
+export async function listChunks(
+  documentId: string,
+  opts: { page?: number; page_size?: number; chunk_type?: string } = {},
+  getToken?: GetTokenFn
+): Promise<PaginatedList<ChunkOut>> {
+  return apiFetch<PaginatedList<ChunkOut>>(`/documents/${documentId}/chunks`, {
+    query: {
+      page: opts.page ?? 1,
+      page_size: opts.page_size ?? 50,
+      chunk_type: opts.chunk_type,
+    },
+    getToken,
+  });
+}
+
+/**
+ * PATCH /documents/{id} — update analyst-corrected metadata fields.
+ *
+ * The backend coerces ticker to uppercase and silently ignores any
+ * unrecognised keys, so we only send the four documented fields.
+ */
+export async function updateDocumentMetadata(
+  documentId: string,
+  body: DocumentMetadataUpdate,
+  getToken?: GetTokenFn
+): Promise<DocumentOut> {
+  return apiFetch<DocumentOut>(`/documents/${documentId}`, {
+    method: "PATCH",
+    json: body,
+    getToken,
+  });
 }
 
 /**
