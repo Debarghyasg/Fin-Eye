@@ -60,8 +60,10 @@ openai==1.52.0                   # OpenAI Python client for GPT-4o
 celery[librabbitmq]==5.4.0
 flower==2.0.1                    # optional Celery monitoring UI on :5555
 
-# ── Redis (response/session cache only — NOT a broker)
-redis[hiredis]==5.0.6            # async Redis client
+# Redis removed — the codebase never imports it.
+# The original BM25 cache that used Redis was replaced by
+# Qdrant native sparse vectors (see rag/qdrant_store.py).
+# If you add response-caching in the future, re-add redis[hiredis].
 
 # ── Compliance: Fernet encryption at rest (PDF §10) ──────────────
 # AES-128-CBC + HMAC-SHA256, MIT-licensed, AWS KMS analog in prod.
