@@ -81,17 +81,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await asyncio.to_thread(_run_migrations)
         log.info("migrations_applied")
     except Exception as exc:
-        # Log the full traceback so the operator can see what actually failed
-        # — bare str(exc) often hides the SQL error context.
         log.error("migration_failed", error=str(exc), exc_info=exc)
-        # Fail fast outside development so a broken schema can't masquerade
-        # as a healthy app. In development, keep serving so /docs and the
-        # logs remain reachable for diagnosis.
         if settings.ENVIRONMENT != "development":
             raise
 
-    # Ensure S3 bucket exists (real S3, LocalStack, or SeaweedFS — they all
-    # share the same boto3 head_bucket / create_bucket flow).
+    # Ensure S3 bucket exists
     if settings.effective_use_s3:
         try:
             import asyncio
@@ -116,12 +110,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             log.warning("sqs_queue_check_failed", error=str(exc))
 
     # Start EDGAR poller
-    # PR 2: when running with Celery (the recommended path) Celery Beat owns
-    # this schedule. We keep the in-process asyncio fallback for solo dev so
-    # you can still see filing alerts without booting RabbitMQ + Beat. Set
-    # USE_EDGAR_POLLER=true to enable; the inline runner skips itself if the
-    # beat schedule has already been registered with Celery (best-effort —
-    # operators are expected to choose one path or the other).
     if settings.USE_EDGAR_POLLER:
         try:
             from app.services.edgar import start_poller
@@ -135,7 +123,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("shutting_down")
 
-    # Stop EDGAR poller
     if settings.USE_EDGAR_POLLER:
         try:
             from app.services.edgar import stop_poller
@@ -164,12 +151,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── Prometheus metrics (PR 3 — observability) ─────────────────────────
-    # Auto-instruments every route. Exposes /metrics for the prometheus
-    # container to scrape. Request counter, latency histogram, in-flight
-    # gauge — all standard. Production swap: scrape from CloudWatch via
-    # a sidecar exporter; the metric NAMES match Prometheus conventions
-    # so Grafana dashboards port unchanged.
+    # ── Prometheus metrics ─────────────────────────────────────────────────
     if settings.ENABLE_PROMETHEUS:
         try:
             from prometheus_fastapi_instrumentator import Instrumentator
@@ -187,27 +169,16 @@ def create_app() -> FastAPI:
         except Exception as exc:
             log.warning("prometheus_init_failed", error=str(exc))
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept"],
-        expose_headers=["X-Request-ID"],
-    )
-
-    # ── Request ID middleware (simple, no external dep) ───────────────────────
+    # ── Request ID middleware ─────────────────────────────────────────────────
+    # NOTE: @app.middleware("http") decorators run BEFORE add_middleware() ones.
+    # So we register request ID first (decorator), then CORS last (add_middleware)
+    # which makes CORS execute first in the actual request pipeline.
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):  # type: ignore[return]
         import uuid
         request_id = str(uuid.uuid4())
-        # Stash on request.state so route handlers and the audit logger
-        # can correlate audit rows with HTTP requests via X-Request-ID.
         request.state.request_id = request_id
 
-        # Pre-compute the originating client IP once so audit calls during
-        # the request don't re-parse X-Forwarded-For repeatedly.
         fwd = request.headers.get("x-forwarded-for")
         if fwd:
             request.state.client_ip = fwd.split(",")[0].strip() or None
@@ -219,6 +190,15 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
+
+    # ── CORS — registered last so it executes first (Starlette middleware order)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ── Global exception handlers ─────────────────────────────────────────────
     @app.exception_handler(Exception)
