@@ -48,16 +48,16 @@ def _now() -> datetime:
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
 class DocumentStatus(str, PyEnum):
-    PENDING     = "pending"      # record created, upload not yet confirmed
-    UPLOADING   = "uploading"    # S3 upload in progress
-    UPLOADED    = "uploaded"     # S3 upload confirmed
-    EXTRACTING  = "extracting"   # PyMuPDF / pdfplumber running
-    EXTRACTED   = "extracted"    # raw text + tables saved to S3
-    CHUNKING    = "chunking"     # chunker running
-    CHUNKED     = "chunked"      # chunks written to DB
-    EMBEDDING   = "embedding"    # embedder running (Week 3)
-    INDEXED     = "indexed"      # vectors in Pinecone (Week 3)
-    FAILED      = "failed"       # any stage failed
+    PENDING     = "pending"
+    UPLOADING   = "uploading"
+    UPLOADED    = "uploaded"
+    EXTRACTING  = "extracting"
+    EXTRACTED   = "extracted"
+    CHUNKING    = "chunking"
+    CHUNKED     = "chunked"
+    EMBEDDING   = "embedding"
+    INDEXED     = "indexed"
+    FAILED      = "failed"
 
 
 class ChunkType(str, PyEnum):
@@ -82,7 +82,6 @@ class User(Base):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_uuid
     )
-    # Clerk's opaque user identifier (user_2abc…)
     clerk_user_id: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
     )
@@ -96,7 +95,6 @@ class User(Base):
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
-    # relationships
     workspaces: Mapped[List["Workspace"]] = relationship(
         "Workspace", back_populates="owner", cascade="all, delete-orphan"
     )
@@ -123,7 +121,6 @@ class Workspace(Base):
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
-    # relationships
     owner: Mapped["User"] = relationship("User", back_populates="workspaces")
     documents: Mapped[List["Document"]] = relationship(
         "Document", back_populates="workspace", cascade="all, delete-orphan"
@@ -149,40 +146,34 @@ class Document(Base):
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
-    # File metadata
     original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Financial metadata (can be set by user or auto-detected)
     doc_type: Mapped[str] = mapped_column(
-        Enum(DocumentType, name="document_type_enum"),
+        Enum(DocumentType, name="document_type_enum", values_callable=lambda x: [e.value for e in x]),
         default=DocumentType.OTHER,
         nullable=False,
     )
     company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ticker: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
-    fiscal_period: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # e.g. "FY2023"
+    fiscal_period: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
-    # Storage locations in S3
     s3_key_original: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     s3_key_extracted: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
 
-    # Processing pipeline state
     status: Mapped[str] = mapped_column(
-        Enum(DocumentStatus, name="document_status_enum"),
+        Enum(DocumentStatus, name="document_status_enum", values_callable=lambda x: [e.value for e in x]),
         default=DocumentStatus.PENDING,
         nullable=False,
         index=True,
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # PII scan result (AWS Comprehend)
     pii_scan_passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    pii_entities_found: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list
+    pii_entities_found: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # RAG quality metrics (populated after indexing)
     avg_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -192,7 +183,6 @@ class Document(Base):
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
-    # relationships
     workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="documents")
     uploaded_by: Mapped[Optional["User"]] = relationship("User", foreign_keys=[uploaded_by_id])
     chunks: Mapped[List["Chunk"]] = relationship(
@@ -212,25 +202,21 @@ class Chunk(Base):
         String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    # Content
     text: Mapped[str] = mapped_column(Text, nullable=False)
     chunk_type: Mapped[str] = mapped_column(
-        Enum(ChunkType, name="chunk_type_enum"),
+        Enum(ChunkType, name="chunk_type_enum", values_callable=lambda x: [e.value for e in x]),
         default=ChunkType.PROSE,
         nullable=False,
     )
 
-    # Positional metadata
-    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)   # 0-based ordering within doc
-    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-based PDF page
-    char_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)   # offset in extracted text
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     char_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Table-specific metadata (JSON stored as text for now; use JSONB in prod)
-    table_header: Mapped[Optional[str]] = mapped_column(Text, nullable=True)    # serialised row headers
-    source_section: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)  # e.g. "Risk Factors"
+    table_header: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_section: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
-    # Embedding (Week 3 — pinecone_id links this chunk to a Pinecone vector)
     pinecone_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
     embedding_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
@@ -238,7 +224,6 @@ class Chunk(Base):
         DateTime(timezone=True), default=_now, nullable=False
     )
 
-    # relationships
     document: Mapped["Document"] = relationship("Document", back_populates="chunks")
 
     def __repr__(self) -> str:
@@ -250,11 +235,6 @@ class Chunk(Base):
 
 # ── query_logs (immutable audit trail) ───────────────────────────────────────
 class QueryLog(Base):
-    """
-    Append-only audit log of every RAG query.
-    Satisfies SEC Rule 17a-4 record retention requirements.
-    Never update or delete rows from this table.
-    """
     __tablename__ = "query_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -269,7 +249,6 @@ class QueryLog(Base):
     answer_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # JSON arrays serialised as text
     source_chunk_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source_doc_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -284,14 +263,8 @@ class QueryLog(Base):
         return f"<QueryLog id={self.id!r} user={self.user_id!r}>"
 
 
-# ── analytics_summary (aggregated metrics for fast queries) ─────────────────────
+# ── analytics_summary ─────────────────────────────────────────────────────────
 class AnalyticsSummary(Base):
-    """
-    Aggregated query metrics for analytics dashboard.
-    
-    Supplements the detailed query_logs with pre-calculated metrics
-    for faster analytics queries without scanning the full audit table.
-    """
     __tablename__ = "analytics_summary"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -301,13 +274,12 @@ class AnalyticsSummary(Base):
     workspace_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    
-    # Pre-calculated metrics
+
     source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     citation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     unique_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     avg_source_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False, index=True
     )
@@ -318,12 +290,6 @@ class AnalyticsSummary(Base):
 
 # ── document_comparisons ──────────────────────────────────────────────────────
 class DocumentComparison(Base):
-    """
-    Stores results of financial document comparisons for future reference.
-    
-    Each comparison analyzes two documents and extracts financial metrics,
-    sentiment analysis, and percentage changes between reporting periods.
-    """
     __tablename__ = "document_comparisons"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -333,30 +299,26 @@ class DocumentComparison(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    
-    # Documents being compared
+
     document_a_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
     document_b_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
-    
-    # Comparison results (stored as JSON)
-    financial_metrics_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
-    sentiment_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+
+    financial_metrics_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sentiment_comparison: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     narrative_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
-    # Summary statistics
+
     total_metrics_compared: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metrics_with_significant_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    overall_sentiment_shift: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # positive/negative/stable
-    
-    # Processing metadata
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="processing")  # processing/completed/failed
+    overall_sentiment_shift: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="processing")
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False, index=True
     )
@@ -370,35 +332,24 @@ class DocumentComparison(Base):
 
 # ── sentiment_analysis ────────────────────────────────────────────────────────
 class SentimentAnalysis(Base):
-    """
-    Stores FinBERT sentiment analysis results for financial documents.
-    
-    Tracks sentiment over time for management commentary, earnings calls,
-    and other forward-looking statements in financial documents.
-    """
     __tablename__ = "sentiment_analysis"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     document_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    
-    # Sentiment scores (0.0 to 1.0)
+
     positive_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     neutral_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     negative_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    
-    # Analysis metadata
-    dominant_sentiment: Mapped[str] = mapped_column(String(20), nullable=False)  # positive/neutral/negative
-    confidence_level: Mapped[str] = mapped_column(String(20), nullable=False)  # high/medium/low
+
+    dominant_sentiment: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence_level: Mapped[str] = mapped_column(String(20), nullable=False)
     sections_analyzed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
-    # Detailed results (stored as JSON)
-    section_sentiments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
-    
-    # Model information
+
+    section_sentiments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     model_used: Mapped[str] = mapped_column(String(100), nullable=False, default="ProsusAI/finbert")
-    
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False, index=True
     )
@@ -407,16 +358,8 @@ class SentimentAnalysis(Base):
         return f"<SentimentAnalysis id={self.id!r} doc={self.document_id!r} sentiment={self.dominant_sentiment}>"
 
 
-
-# ── metric_history (per-ticker historical metric values for anomaly detection)
+# ── metric_history ────────────────────────────────────────────────────────────
 class MetricHistory(Base):
-    """
-    Per-ticker time series of extracted financial metric values.
-
-    Populated whenever a document for a ticker is processed. Anomaly detection
-    pulls historical rows for the same (workspace_id, ticker, metric_name) tuple
-    to compute mean/stdev/Z-score and decide whether to flag the new value.
-    """
     __tablename__ = "metric_history"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -434,7 +377,6 @@ class MetricHistory(Base):
         DateTime(timezone=True), default=_now, nullable=False, index=True
     )
 
-    # One row per (document, metric) — re-running detection should upsert, not duplicate
     __table_args__ = (
         UniqueConstraint("document_id", "metric_name", name="uq_metric_history_doc_metric"),
     )
@@ -443,12 +385,8 @@ class MetricHistory(Base):
         return f"<MetricHistory ticker={self.ticker} {self.metric_name}={self.metric_value}>"
 
 
-# ── alerts (anomaly + sentiment + filing notifications) ───────────────────────
+# ── alerts ────────────────────────────────────────────────────────────────────
 class Alert(Base):
-    """
-    User-facing alert generated by the anomaly detection or other monitors.
-    SEC 17a-4-style: never updated except `read` and `email_sent` flags.
-    """
     __tablename__ = "alerts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -464,14 +402,11 @@ class Alert(Base):
     ticker: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
 
     alert_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    # one of: "anomaly" | "sentiment" | "regulatory" | "filing"
     severity: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    # one of: "high" | "medium" | "low" | "info"
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
 
-    # Statistical fields (populated for anomaly alerts)
     metric_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     metric_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     z_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -490,12 +425,8 @@ class Alert(Base):
         return f"<Alert {self.alert_type}/{self.severity} ticker={self.ticker!r} title={self.title!r}>"
 
 
-# ── ticker_subscriptions (user opt-in for monitoring) ─────────────────────────
+# ── ticker_subscriptions ──────────────────────────────────────────────────────
 class TickerSubscription(Base):
-    """
-    A user's subscription to a ticker. Drives anomaly notification routing
-    and the SEC EDGAR background poller.
-    """
     __tablename__ = "ticker_subscriptions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -508,7 +439,6 @@ class TickerSubscription(Base):
     ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    # Per-channel toggles
     subscribe_anomaly: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     subscribe_sentiment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     subscribe_filing: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -517,7 +447,6 @@ class TickerSubscription(Base):
 
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
-    # SEC EDGAR poller state
     last_edgar_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_edgar_filing_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     last_edgar_accession: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -537,71 +466,35 @@ class TickerSubscription(Base):
         return f"<TickerSubscription user={self.user_id!r} ticker={self.ticker!r} active={self.active}>"
 
 
-
-# ── audit_logs (SEC Rule 17a-4 append-only audit trail) ──────────────────────
+# ── audit_logs ────────────────────────────────────────────────────────────────
 class AuditLog(Base):
-    """Append-only audit trail of every meaningful user action.
-
-    Distinct from :class:`QueryLog` (which captures RAG-specific Q/A pairs):
-    this table records *all* actions — UPLOAD, DOWNLOAD, DELETE, EXPORT,
-    LOGIN, COMPARE, ALERT_VIEW, etc. — across the platform.
-
-    Schema mirrors the production DynamoDB layout so the production migration
-    is a model swap, not a redesign:
-
-        partition key  → workspace_id
-        sort key       → created_at
-        GSI            → user_id
-
-    Records must never be UPDATEd or DELETEd. The ``expires_at`` column is a
-    *soft* TTL: a downstream cleanup job (Phase 5) will physically purge rows
-    past the SEC 17a-4 retention horizon. Until then this is an append-only
-    log even at the DB level (the migration revokes UPDATE/DELETE on the
-    application role).
-    """
     __tablename__ = "audit_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
 
-    # Tenancy / actor
     workspace_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        ForeignKey("workspaces.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
+        String(36), ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True,
     )
     user_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
     )
 
-    # What happened
     action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    # Free-form but standard values: QUERY | UPLOAD | DOWNLOAD | DELETE |
-    # EXPORT | COMPARE | LOGIN | UPDATE | VIEW | ALERT_VIEW | ALERT_ACK
     resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    # document | query | workspace | comparison | alert | subscription | user
     resource_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
-    # Request context
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Free-form JSON for action-specific detail (filename, query_text, etc.).
-    # Maps to JSONB on PostgreSQL, JSON on SQLite (test).
     audit_metadata: Mapped[Optional[dict]] = mapped_column(
         "metadata", JSON, nullable=True,
     )
 
-    # Time
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False, index=True
     )
-    # Soft TTL — a Phase-5 cleanup job will purge rows past this timestamp.
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -613,57 +506,30 @@ class AuditLog(Base):
         )
 
 
-
-# ── chunk_embeddings (dense embeddings — plain Postgres, no pgvector) ─────────
+# ── chunk_embeddings ──────────────────────────────────────────────────────────
 class ChunkEmbedding(Base):
-    """
-    One dense embedding vector per chunk.
-
-    Replaces the external Qdrant vector store.  The embedding is stored as a
-    JSON-encoded list[float] in a plain ``TEXT`` column, so this works on a
-    vanilla PostgreSQL install with **no extensions** (and on SQLite in tests).
-    Similarity search computes cosine in Python at query time — see
-    ``app/services/rag/pg_vector_store.py``.
-
-    The ``point_id`` column carries the deterministic UUID5 derived from
-    ``"{document_id}_{chunk_index}"``; the retriever joins on it to resolve
-    a search hit back to its parent chunk + document.
-    """
     __tablename__ = "chunk_embeddings"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     chunk_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("chunks.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
+        String(36), ForeignKey("chunks.id", ondelete="CASCADE"),
+        nullable=False, unique=True, index=True,
     )
     document_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("documents.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False, index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False, index=True,
     )
-    # Deterministic UUID5 — the retriever's join key from a search hit.
     point_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-
-    # JSON-encoded list[float] of length EMBEDDING_DIMENSION (384).
-    # Plain TEXT keeps this dependency-free on every backend; all reads/writes
-    # go through pg_vector_store.py which json-(de)serialises the vector.
     embedding: Mapped[str] = mapped_column(Text, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
 
-    # relationships
     chunk: Mapped["Chunk"] = relationship("Chunk", foreign_keys=[chunk_id])
 
     def __repr__(self) -> str:
