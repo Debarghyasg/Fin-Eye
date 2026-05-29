@@ -23,6 +23,11 @@ interface AppState {
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
 
+  // Workspace sources panel (right rail) visibility
+  sourcesPanelOpen: boolean;
+  setSourcesPanelOpen: (v: boolean) => void;
+  toggleSourcesPanel: () => void;
+
   // Documents
   documents: Document[];
   addDocument: (doc: Document) => void;
@@ -32,6 +37,8 @@ interface AppState {
   // Query
   queryHistory: QueryEntry[];
   addQuery: (q: QueryEntry) => void;
+  removeQuery: (id: string) => void;
+  clearQueries: () => void;
   isQuerying: boolean;
   setIsQuerying: (v: boolean) => void;
 
@@ -74,6 +81,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
 
+  sourcesPanelOpen: true,
+  setSourcesPanelOpen: (v) => set({ sourcesPanelOpen: v }),
+  toggleSourcesPanel: () => set((s) => ({ sourcesPanelOpen: !s.sourcesPanelOpen })),
+
   // Start empty — the workspace is hydrated exclusively from the live
   // backend (see workspace/page.tsx). No preexisting/sample documents.
   documents: [],
@@ -92,6 +103,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Start empty — query history is hydrated from the backend.
   queryHistory: [],
   addQuery: (q) => set((s) => ({ queryHistory: [q, ...s.queryHistory] })),
+  // Remove a single chat turn from the in-view history. Note: backend
+  // query_logs are an immutable SEC 17a-4 audit trail and are never deleted;
+  // this only hides the turn from the current chat view.
+  removeQuery: (id) =>
+    set((s) => ({ queryHistory: s.queryHistory.filter((q) => q.id !== id) })),
+  clearQueries: () => set({ queryHistory: [] }),
   isQuerying: false,
   setIsQuerying: (v) => set({ isQuerying: v }),
 

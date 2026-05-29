@@ -22,7 +22,7 @@
  */
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, CheckSquare, Square, Filter } from "lucide-react";
+import { Plus, Search, CheckSquare, Square, Filter, BookOpen } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
 
@@ -123,6 +123,8 @@ export default function WorkspacePage() {
   const selectedDocIds = useAppStore((s) => s.selectedDocIds);
   const setSelectedDocIds = useAppStore((s) => s.setSelectedDocIds);
   const clearSelectedDocs = useAppStore((s) => s.clearSelectedDocs);
+  const sourcesPanelOpen = useAppStore((s) => s.sourcesPanelOpen);
+  const setSourcesPanelOpen = useAppStore((s) => s.setSourcesPanelOpen);
 
   // ── Live-mode hydration ─────────────────────────────────────────────
   // Pull the user's documents and query history from the backend so the
@@ -216,7 +218,7 @@ export default function WorkspacePage() {
 
       <div className="flex flex-1 min-h-0">
         {/* ── Left: document rail ───────────────────────────────────────── */}
-        <div className="w-[320px] flex-shrink-0 border-r border-white/[0.07] flex flex-col">
+        <div className="w-[260px] xl:w-[320px] flex-shrink-0 border-r border-white/[0.07] flex flex-col">
           {/* Toolbar */}
           <div className="p-4 space-y-3 border-b border-white/[0.07]">
             <div className="relative">
@@ -335,12 +337,26 @@ export default function WorkspacePage() {
         </div>
 
         {/* ── Center: chat / query panel ───────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 relative">
           <QueryPanel />
+
+          {/* Floating "show sources" toggle — visible only when the panel is
+              hidden, so the user can always bring the citations back. */}
+          {!sourcesPanelOpen && (
+            <button
+              onClick={() => setSourcesPanelOpen(true)}
+              aria-label="Show sources panel"
+              title="Show sources"
+              className="absolute top-3 right-3 z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-card/90 backdrop-blur text-xs text-muted-foreground hover:text-foreground hover:border-fin-500/40 transition-colors shadow-lg"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-fin-400" />
+              Sources
+            </button>
+          )}
         </div>
 
-        {/* ── Right: sources panel ─────────────────────────────────────── */}
-        <SourcesPanel />
+        {/* ── Right: sources panel (collapsible) ───────────────────────── */}
+        {sourcesPanelOpen && <SourcesPanel />}
       </div>
     </div>
   );
