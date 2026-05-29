@@ -318,13 +318,13 @@ async def upload_document(
     await db.commit()  # persist UPLOADING row — document_id is now durable
     document_id = doc.id
 
-    # ── Upload to S3 ──────────────────────────────────────────────────────────
-    original_s3_key = storage.original_key(document_id, file.filename or "upload")
+    # ── Upload to storage (local filesystem by default, S3 when USE_S3=true) ──
+    storage_key = storage.original_key(document_id, file.filename or "upload")
     try:
         await asyncio.to_thread(
             storage.upload,
             file_bytes,
-            original_s3_key,
+            storage_key,
             mime_type,
             {"document_id": document_id, "uploaded_by": current_user.clerk_user_id},
         )
@@ -347,7 +347,7 @@ async def upload_document(
             detail="Document storage unavailable. Please try again.",
         ) from exc
 
-    doc.s3_key_original = original_s3_key
+    doc.s3_key_original = storage_key
     doc.status = DocumentStatus.UPLOADED
 
     # ── Pre-extraction PII scan (text/plain only, defense-in-depth) ──────────
@@ -379,7 +379,7 @@ async def upload_document(
             from app.services.aws import sqs
             await asyncio.to_thread(
                 sqs.publish_document_uploaded,
-                document_id, workspace_id, original_s3_key, mime_type,
+                document_id, workspace_id, storage_key, mime_type,
             )
         except Exception as exc:
             log.warning("SQS publish failed: %s", exc)
@@ -390,7 +390,7 @@ async def upload_document(
     # When CELERY_TASK_ALWAYS_EAGER=true (tests) the task runs inline.
     try:
         from app.services.tasks import process_document
-        process_document.delay(document_id, original_s3_key, mime_type)
+        process_document.delay(document_id, storage_key, mime_type)
     except Exception as exc:
         # Broker outage must not break the upload — fall back to in-process
         # BackgroundTasks so a single-node dev environment still works.
@@ -398,7 +398,7 @@ async def upload_document(
             "Celery dispatch failed (%s) — falling back to BackgroundTasks", exc,
         )
         background_tasks.add_task(
-            _process_document_pipeline, document_id, original_s3_key, mime_type
+            _process_document_pipeline, document_id, storage_key, mime_type
         )
 
     # ── Audit trail (SEC 17a-4) ────────────────────────────────────────────

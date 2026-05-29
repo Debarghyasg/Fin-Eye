@@ -49,9 +49,17 @@ celery_app.conf.update(
     task_default_exchange=settings.CELERY_TASK_DEFAULT_QUEUE,
     task_default_routing_key=settings.CELERY_TASK_DEFAULT_QUEUE,
 
-    # Eager mode for tests — runs the task synchronously in-process.
+    # Eager mode for local dev — runs the task synchronously in-process.
+    # task_eager_propagates is deliberately kept False even in eager mode.
+    # With propagates=True, any pipeline exception (Qdrant down, extraction
+    # failure, etc.) surfaces back into the upload handler AFTER db.commit()
+    # has already fired.  The upload handler's try/except around .delay()
+    # catches it and falls back to BackgroundTasks — but that still reruns
+    # a failing pipeline.  With propagates=False, pipeline failures are
+    # recorded as FAILED on the document row by the pipeline's own error
+    # handler, and the upload handler always returns 202 as intended.
     task_always_eager=settings.CELERY_TASK_ALWAYS_EAGER,
-    task_eager_propagates=settings.CELERY_TASK_ALWAYS_EAGER,
+    task_eager_propagates=False,
 
     # Time / size limits — protect workers from runaway PDFs
     task_time_limit=15 * 60,           # hard kill after 15 min
