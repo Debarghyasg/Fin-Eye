@@ -41,7 +41,7 @@ log = get_task_logger(__name__)
 def process_document(
     self,
     document_id: str,
-    s3_key: str,
+    s3_key: str,          # named s3_key for backwards compat — maps to storage_key
     mime_type: str,
 ) -> dict[str, Any]:
     """Run the full ingestion pipeline for a freshly uploaded document.
@@ -56,6 +56,9 @@ def process_document(
     # worker boot and causes circular imports with the audit logger.
     from app.api.routes.documents import _process_document_pipeline
 
+    # _process_document_pipeline's first positional param is storage_key.
+    # We pass s3_key as the storage_key value — they are the same local
+    # filesystem path, the variable was renamed in a prior refactor.
     asyncio.run(_process_document_pipeline(document_id, s3_key, mime_type))
 
     log.info("process_document done id=%s", document_id)

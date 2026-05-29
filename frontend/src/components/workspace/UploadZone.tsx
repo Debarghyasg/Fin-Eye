@@ -21,6 +21,7 @@ type UploadFile = {
   file: File;
   status: "uploading" | "processing" | "done" | "error";
   progress: number;
+  errorMessage?: string;
 };
 
 /**
@@ -214,11 +215,13 @@ export function UploadZone() {
 
         pollersRef.current.set(docId, handle);
       } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Unknown error — check browser console";
         // eslint-disable-next-line no-console
         console.error("[upload] failed", err);
         setFiles((prev) =>
           prev.map((f) =>
-            f.id === uploadId ? { ...f, status: "error" } : f
+            f.id === uploadId ? { ...f, status: "error", errorMessage: msg } : f
           )
         );
       }
@@ -228,6 +231,26 @@ export function UploadZone() {
 
   const onDrop = useCallback(
     (accepted: File[]) => {
+      // Guard: don't start a real upload if the workspace ID hasn't resolved
+      // yet. React Query's /auth/me/workspaces call is async — on the very
+      // first drop after page load it may still be in flight. Show a clear
+      // error rather than silently falling back to the offline mock.
+      if (IS_LIVE_API && isSignedIn && !workspaceId) {
+        console.error(
+          "[upload] workspaceId not yet resolved — workspace query may still be loading. " +
+          "Wait a moment and try again, or check that NEXT_PUBLIC_API_URL is set correctly."
+        );
+        // Add files in error state so the user sees feedback immediately.
+        const errFiles: UploadFile[] = accepted.map((file) => ({
+          id: `upload-${Date.now()}-${Math.random()}`,
+          file,
+          status: "error",
+          progress: 0,
+        }));
+        setFiles((prev) => [...prev, ...errFiles]);
+        return;
+      }
+
       const newFiles: UploadFile[] = accepted.map((file) => ({
         id: `upload-${Date.now()}-${Math.random()}`,
         file,
@@ -265,6 +288,13 @@ export function UploadZone() {
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           You&apos;re not signed in — uploads will use the offline mock. Sign
           in to upload to the real backend.
+        </div>
+      )}
+
+      {IS_LIVE_API && isSignedIn && !workspaceId && (
+        <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300 flex items-center gap-2">
+          <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
+          Resolving workspace… wait a moment before uploading.
         </div>
       )}
 
@@ -367,9 +397,9 @@ export function UploadZone() {
                 )}
                 {f.status === "error" && (
                   <div className="flex items-center gap-1.5">
-                    <AlertCircle className="w-3 h-3 text-red-400" />
-                    <p className="text-xs text-red-400">
-                      Upload failed — see browser console for details
+                    <AlertCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                    <p className="text-xs text-red-400 truncate" title={f.errorMessage}>
+                      {f.errorMessage ?? "Upload failed — check browser console"}
                     </p>
                   </div>
                 )}

@@ -614,22 +614,20 @@ class AuditLog(Base):
 
 
 
-# ── chunk_embeddings (pgvector dense embeddings) ──────────────────────────────
+# ── chunk_embeddings (dense embeddings — plain Postgres, no pgvector) ─────────
 class ChunkEmbedding(Base):
     """
-    One dense embedding vector per chunk, stored via pgvector.
+    One dense embedding vector per chunk.
 
-    Replaces the external Qdrant vector store — all similarity search runs
-    inside PostgreSQL using the ``<=>`` cosine-distance operator.
+    Replaces the external Qdrant vector store.  The embedding is stored as a
+    JSON-encoded list[float] in a plain ``TEXT`` column, so this works on a
+    vanilla PostgreSQL install with **no extensions** (and on SQLite in tests).
+    Similarity search computes cosine in Python at query time — see
+    ``app/services/rag/pg_vector_store.py``.
 
     The ``point_id`` column carries the deterministic UUID5 derived from
-    ``"{document_id}_{chunk_index}"`` so the retriever can join back to
-    ``chunks.pinecone_id`` without an extra lookup.
-
-    The ``embedding`` column is declared as ``Text`` in the ORM model so
-    SQLAlchemy doesn't need the pgvector Python type installed.  The actual
-    ``VECTOR(384)`` column type is created by migration 0006; ORM reads and
-    writes go through raw SQL in pg_vector_store.py which handles the cast.
+    ``"{document_id}_{chunk_index}"``; the retriever joins on it to resolve
+    a search hit back to its parent chunk + document.
     """
     __tablename__ = "chunk_embeddings"
 
@@ -653,12 +651,12 @@ class ChunkEmbedding(Base):
         nullable=False,
         index=True,
     )
-    # Deterministic UUID5 matching chunks.pinecone_id — the retriever join key.
+    # Deterministic UUID5 — the retriever's join key from a search hit.
     point_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
 
-    # The actual column is VECTOR(384) — declared TEXT here so the ORM works
-    # without the pgvector SQLAlchemy extension type installed.
-    # All vector reads/writes go through raw SQL in pg_vector_store.py.
+    # JSON-encoded list[float] of length EMBEDDING_DIMENSION (384).
+    # Plain TEXT keeps this dependency-free on every backend; all reads/writes
+    # go through pg_vector_store.py which json-(de)serialises the vector.
     embedding: Mapped[str] = mapped_column(Text, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(

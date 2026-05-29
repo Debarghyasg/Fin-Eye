@@ -1,16 +1,16 @@
 """
-Retriever — PostgreSQL pgvector edition.
+Retriever — PostgreSQL dense cosine search (no pgvector, no external service).
 
-Replaces the Qdrant hybrid-search path.  Dense cosine similarity search
-runs entirely inside PostgreSQL using the pgvector ``<=>`` operator — no
-external service required.
+Embeddings are stored as JSON in ``chunk_embeddings`` and ranked in Python
+(see ``pg_vector_store.cosine_search``).  Runs on a vanilla PostgreSQL
+install with no extensions.
 
 What's preserved
 ----------------
 * Public signature: ``retrieve(request, db, top_k) → list[dict]``
 * Result shape returned to the caller: list of dicts with ``rrf_score``
-  (renamed from the pgvector ``score``), full chunk text, and metadata.
-  Downstream re-ranker and generator already speak this shape.
+  (the cosine score), full chunk text, and metadata.  Downstream re-ranker
+  and generator already speak this shape.
 """
 from __future__ import annotations
 
@@ -117,7 +117,7 @@ async def retrieve(
         log.warning("Query embedding failed: %s — returning empty", exc)
         return []
 
-    # Run pgvector cosine search.
+    # Run dense cosine search (computed in Python — see pg_vector_store).
     try:
         hits = await pg_vector_store.cosine_search(
             query_vec=dense_vec,

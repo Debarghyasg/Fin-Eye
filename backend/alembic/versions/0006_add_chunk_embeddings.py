@@ -1,33 +1,28 @@
-"""add chunk_embeddings table for pgvector (replaces Qdrant)
+"""add chunk_embeddings table (plain PostgreSQL — no pgvector extension)
 
 Revision ID: 0006_chunk_embeddings
 Revises: 0005_audit_logs
 Create Date: 2026-05-29
 
-Installs the pgvector extension and creates the ``chunk_embeddings`` table
-that stores one 384-dimensional dense embedding per chunk.  All similarity
-search now runs inside PostgreSQL — no external vector store service needed.
+Creates the ``chunk_embeddings`` table that stores one 384-dimensional dense
+embedding per chunk.  The embedding is stored as a JSON-encoded ``TEXT``
+column so this works on a **vanilla PostgreSQL install with zero extensions**
+(and on SQLite for tests).
 
-Requirements
-------------
-  PostgreSQL 15+ with the pgvector extension available:
-    CREATE EXTENSION IF NOT EXISTS vector;
+Why not pgvector?
+-----------------
+The previous version of this migration required the pgvector extension
+(``CREATE EXTENSION vector`` + ``VECTOR(384)`` + an IVFFlat index).  pgvector
+is not bundled with standard PostgreSQL and is painful to install on Windows,
+which made startup migrations fail and silently broke the whole ingestion
+pipeline (the table was never created).
 
-  If pgvector is not installed:
-    Ubuntu/Debian : sudo apt install postgresql-15-pgvector
-    macOS (brew)  : brew install pgvector
-    Docker        : use pgvector/pgvector:pg15 image
-
-Index
------
-  An IVFFlat approximate-nearest-neighbour index is created on the
-  embedding column with cosine distance.  For small datasets (<100 k rows)
-  a brute-force scan (no index) is equally fast; the index becomes
-  beneficial above ~50 k rows.
-
-  The index is created CONCURRENTLY so it does not block writes during
-  migration.  ``lists=100`` is appropriate for datasets up to ~1 M rows;
-  tune upward for larger corpora.
+For a local, single-workspace tool the corpus is small (hundreds to a few
+thousand chunks), so cosine similarity is computed in Python at query time
+(see ``app/services/rag/pg_vector_store.py``).  Brute-force cosine over a few
+thousand 384-dim vectors is sub-50ms — no ANN index needed.  If this ever
+needs to scale, swap the column to ``VECTOR(384)`` and add an IVFFlat/HNSW
+index in a follow-up migration on a pgvector-enabled database.
 """
 from typing import Sequence, Union
 
@@ -41,12 +36,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-
-    # pgvector extension — only needed on PostgreSQL.
-    if bind.dialect.name == "postgresql":
-        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-
     op.create_table(
         "chunk_embeddings",
         sa.Column("id",           sa.String(36),               nullable=False),
@@ -54,13 +43,9 @@ def upgrade() -> None:
         sa.Column("document_id",  sa.String(36),               nullable=False),
         sa.Column("workspace_id", sa.String(36),               nullable=False),
         sa.Column("point_id",     sa.String(36),               nullable=False),
-        # VECTOR(384) on PostgreSQL; TEXT on SQLite (used in tests).
-        sa.Column(
-            "embedding",
-            sa.Text() if bind.dialect.name != "postgresql"
-            else sa.Text(),   # overridden below for pg
-            nullable=False,
-        ),
+        # JSON-encoded list[float] of length EMBEDDING_DIMENSION (384).
+        # TEXT keeps this dependency-free on every backend.
+        sa.Column("embedding",    sa.Text(),                   nullable=False),
         sa.Column("created_at",   sa.DateTime(timezone=True),  nullable=False),
 
         sa.ForeignKeyConstraint(["chunk_id"],     ["chunks.id"],     ondelete="CASCADE"),
@@ -69,7 +54,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # Unique constraint: one embedding per chunk.
+    # One embedding per chunk (unique) + fast filters for search/delete.
     op.create_index(
         "ix_chunk_embeddings_chunk_id",
         "chunk_embeddings", ["chunk_id"],
@@ -79,35 +64,8 @@ def upgrade() -> None:
     op.create_index("ix_chunk_embeddings_workspace_id", "chunk_embeddings", ["workspace_id"])
     op.create_index("ix_chunk_embeddings_point_id",     "chunk_embeddings", ["point_id"])
 
-    # On PostgreSQL: change the embedding column to the proper VECTOR(384) type
-    # and build the IVFFlat ANN index.
-    if bind.dialect.name == "postgresql":
-        op.execute(
-            "ALTER TABLE chunk_embeddings "
-            "ALTER COLUMN embedding TYPE vector(384) "
-            "USING embedding::vector(384)"
-        )
-        # IVFFlat approximate nearest-neighbour index (cosine distance).
-        # CREATE INDEX CONCURRENTLY cannot run inside a transaction block;
-        # we close the implicit transaction first.
-        op.execute("COMMIT")
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
-            "ix_chunk_embeddings_embedding_cosine "
-            "ON chunk_embeddings "
-            "USING ivfflat (embedding vector_cosine_ops) "
-            "WITH (lists = 100)"
-        )
-
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS "
-            "ix_chunk_embeddings_embedding_cosine"
-        )
-
     op.drop_index("ix_chunk_embeddings_point_id",     table_name="chunk_embeddings")
     op.drop_index("ix_chunk_embeddings_workspace_id", table_name="chunk_embeddings")
     op.drop_index("ix_chunk_embeddings_document_id",  table_name="chunk_embeddings")

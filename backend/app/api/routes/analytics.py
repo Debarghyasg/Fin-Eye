@@ -81,12 +81,14 @@ async def pipeline_health(
     stages: list[PipelineStageStatus] = []
 
     # ── DB ping ───────────────────────────────────────────────────────────────
+    db_status = "ok"
     t0 = time.perf_counter()
     try:
         await db.execute(text("SELECT 1"))
         db_ms = int((time.perf_counter() - t0) * 1000)
         stages.append(PipelineStageStatus(stage="PostgreSQL", status="ok", latency_ms=db_ms, detail=None))
     except Exception as exc:
+        db_status = "down"
         stages.append(PipelineStageStatus(stage="PostgreSQL", status="down", latency_ms=None, detail=str(exc)))
 
     # ── S3 connectivity (stub) ────────────────────────────────────────────────
