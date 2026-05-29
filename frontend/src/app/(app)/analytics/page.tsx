@@ -727,10 +727,12 @@ function UserAuditTrailCard({
   // Combine postgres + dynamodb log slices into one chronological list
   // for display. Both shapes are loose dicts so we render only the keys
   // we know about and ignore the rest.
-  const entries = data
-    ? [...data.audit_trail.dynamodb_logs, ...data.audit_trail.postgres_logs].slice(0, 8)
-    : [];
-
+const entries = data
+  ? [
+      ...(data.audit_trail.dynamodb_logs ?? []),
+      ...(data.audit_trail.postgres_logs ?? []),
+    ].slice(0, 8)
+  : [];
   return (
     <motion.section
       initial={{ opacity: 0, y: 16 }}
