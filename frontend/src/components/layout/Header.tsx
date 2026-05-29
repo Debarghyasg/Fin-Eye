@@ -3,9 +3,8 @@ import React from "react";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
-import { Search, Bell, Shield, ChevronDown, Activity } from "lucide-react";
+import { Bell, Shield, ChevronDown, Activity, AlertTriangle } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -16,7 +15,6 @@ import {
 import { IS_LIVE_API, getApiHealth, type ApiHealthResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
-import { IS_LIVE_API } from "@/lib/api/client";
 
 export function Header({ title, subtitle }: { title: string; subtitle?: string }) {
   const alerts = useAppStore((s) => s.alerts);
@@ -24,7 +22,6 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
 
   return (
     <>
-      {/* ── Mock-mode warning banner ──────────────────────────────────────── */}
       {!IS_LIVE_API && (
         <div className="w-full bg-amber-500/15 border-b border-amber-500/30 px-6 py-2 flex items-center gap-2 text-xs text-amber-300">
           <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
@@ -43,21 +40,9 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
           {subtitle && <p className="text-xs text-muted-foreground -mt-0.5">{subtitle}</p>}
         </motion.div>
 
-        {/* Live API health indicator — wires GET /analytics/health */}
-        <ApiHealthDot />
+        <div className="flex items-center gap-2">
+          <ApiHealthDot />
 
-        {/* Alerts bell */}
-        <Button variant="ghost" size="icon-sm" className="relative">
-          <Bell className="w-4 h-4" />
-          {unread > 0 && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="absolute top-1 right-1 w-2 h-2 rounded-full bg-fin-400"
-            />
-          </div>
-
-          {/* Alerts bell */}
           <Button variant="ghost" size="icon-sm" className="relative">
             <Bell className="w-4 h-4" />
             {unread > 0 && (
@@ -69,13 +54,11 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
             )}
           </Button>
 
-          {/* Compliance badge */}
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-fin-500/10 border border-fin-500/20">
             <Shield className="w-3 h-3 text-fin-400" />
             <span className="text-xs text-fin-300 font-medium">SEC Compliant</span>
           </div>
 
-          {/* User */}
           <button className="flex items-center gap-2 pl-3 border-l border-white/[0.07]">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center text-xs font-bold text-white">
               DS
@@ -89,17 +72,6 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
   );
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
- * ApiHealthDot — small live indicator wired to GET /analytics/health.
- *
- * Polls every 30 s. Renders a coloured dot (emerald=ok, amber=degraded,
- * red=down, slate=disabled in mock mode) plus a hover tooltip with the
- * backend version + database status from the health response.
- *
- * The endpoint is no-auth on the backend, so we deliberately skip the
- * Clerk token (and therefore don't gate on `isSignedIn`) — uptime should
- * surface even on the public landing parts of the app.
- * ────────────────────────────────────────────────────────────────────────── */
 function ApiHealthDot() {
   const { getToken } = useAuth();
 
@@ -112,23 +84,12 @@ function ApiHealthDot() {
     retry: 1,
   });
 
-  // Map the (status × isError) cross-product to a single visual state.
   const visual = (() => {
-    if (!IS_LIVE_API) {
-      return { dot: "bg-slate-500", ping: false, label: "Mock mode" };
-    }
-    if (healthQuery.isLoading) {
-      return { dot: "bg-slate-400", ping: false, label: "Checking…" };
-    }
-    if (healthQuery.isError || !healthQuery.data) {
-      return { dot: "bg-red-500", ping: true, label: "API unreachable" };
-    }
-    if (healthQuery.data.status === "ok") {
-      return { dot: "bg-emerald-400", ping: true, label: "API healthy" };
-    }
-    if (healthQuery.data.status === "degraded") {
-      return { dot: "bg-amber-400", ping: true, label: "API degraded" };
-    }
+    if (!IS_LIVE_API) return { dot: "bg-slate-500", ping: false, label: "Mock mode" };
+    if (healthQuery.isLoading) return { dot: "bg-slate-400", ping: false, label: "Checking…" };
+    if (healthQuery.isError || !healthQuery.data) return { dot: "bg-red-500", ping: true, label: "API unreachable" };
+    if (healthQuery.data.status === "ok") return { dot: "bg-emerald-400", ping: true, label: "API healthy" };
+    if (healthQuery.data.status === "degraded") return { dot: "bg-amber-400", ping: true, label: "API degraded" };
     return { dot: "bg-red-500", ping: true, label: `API ${healthQuery.data.status}` };
   })();
 
@@ -142,16 +103,10 @@ function ApiHealthDot() {
             aria-label={`API status: ${visual.label}`}
           >
             <Activity className="w-3.5 h-3.5 text-muted-foreground" />
-            {/* Status dot, top-right corner */}
             <span className="absolute top-1 right-1">
               <span className={cn("block w-2 h-2 rounded-full", visual.dot)} />
               {visual.ping && (
-                <span
-                  className={cn(
-                    "absolute inset-0 w-2 h-2 rounded-full animate-ping opacity-50",
-                    visual.dot,
-                  )}
-                />
+                <span className={cn("absolute inset-0 w-2 h-2 rounded-full animate-ping opacity-50", visual.dot)} />
               )}
             </span>
           </button>
@@ -160,12 +115,8 @@ function ApiHealthDot() {
           <p className="font-medium">{visual.label}</p>
           {healthQuery.data && (
             <>
-              <p className="text-muted-foreground mt-0.5">
-                DB: <span className="font-mono">{healthQuery.data.database}</span>
-              </p>
-              <p className="text-muted-foreground">
-                v{healthQuery.data.version} · {healthQuery.data.environment}
-              </p>
+              <p className="text-muted-foreground mt-0.5">DB: <span className="font-mono">{healthQuery.data.database}</span></p>
+              <p className="text-muted-foreground">v{healthQuery.data.version} · {healthQuery.data.environment}</p>
             </>
           )}
           {!IS_LIVE_API && (

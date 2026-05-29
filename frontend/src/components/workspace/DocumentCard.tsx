@@ -31,14 +31,6 @@ import { ApiError, IS_LIVE_API, deleteDocument } from "@/lib/api";
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import type { Document } from "@/store/useAppStore";
 import { useAppStore } from "@/store/useAppStore";
-import { IS_LIVE_API } from "@/lib/api/client";
-import {
-  deleteDocument as apiDeleteDocument,
-  getDocumentFileUrl,
-} from "@/lib/api/documents";
-import { ChunksDialog } from "./ChunksDialog";
-import { EditDocumentDialog } from "./EditDocumentDialog";
-
 import { DocumentChunksDialog } from "./DocumentChunksDialog";
 import { DocumentEditDialog } from "./DocumentEditDialog";
 
@@ -50,34 +42,11 @@ const statusConfig = {
 
 export interface DocumentCardProps {
   doc: Document;
-  /** Click handler for the main card body — typically opens the viewer or activates the doc. */
   onClick?: () => void;
-  /** Whether this doc is the "active" one (e.g. opened in viewer). */
   active?: boolean;
-  /**
-   * When true, render a checkbox in the top-right corner that toggles
-   * the doc's membership in `selectedDocIds`. When false, just show the
-   * row without a checkbox.
-   */
   selectable?: boolean;
 }
 
-/**
- * Compact list-style card for a document in the workspace left rail.
- *
- * Phase 4 additions:
- *   - Chunk count shown next to page count when the doc is indexed
- *   - Real progress bar during the "processing" stage (driven by
- *     `processingProgress` 0-100)
- *   - Optional multi-select checkbox that toggles the doc in
- *     `selectedDocIds` so the QueryPanel can scope queries to a subset
- *
- * Wiring (PR follow-up):
- *   - Menu "View PDF"      → opens the existing DocumentViewer via setActiveSource
- *   - Menu "Edit metadata" → opens DocumentEditDialog (PATCH /documents/{id})
- *   - Menu "View chunks"   → opens DocumentChunksDialog (GET /documents/{id}/chunks)
- *   - Menu "Delete"        → confirm dialog → DELETE /documents/{id}
- */
 export function DocumentCard({ doc, onClick, active = false, selectable = false }: DocumentCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -99,18 +68,9 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
   const isProcessing = doc.status === "processing";
   const processingPct = doc.processingProgress ?? 0;
 
-  const { getToken } = useAuth();
-  const queryClient = useQueryClient();
-
-  // ── Delete mutation ──────────────────────────────────────────────────
-  // Was previously fire-and-forget on the local store only (the
-  // `deleteDocument` API client was declared but never invoked). Now it
-  // hits DELETE /documents/{id}, then prunes the local store + cache so
-  // the workspace card list updates without a re-fetch round-trip.
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!IS_LIVE_API) {
-        // Mock mode: just drop the local store row.
         return undefined;
       }
       await deleteDocument(doc.id, getToken);
@@ -150,7 +110,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
               : "border-white/[0.07] bg-card hover:border-white/[0.14] hover:bg-white/[0.03]",
         )}
       >
-        {/* Active glow edge */}
         {active && (
           <motion.div
             layoutId="doc-active"
@@ -198,7 +157,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
             </div>
           </div>
 
-          {/* Right-side controls: select checkbox or menu */}
           <div className="relative flex-shrink-0 flex items-center gap-1">
             {selectable && (
               <button
@@ -244,9 +202,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                     label="View PDF"
                     onClick={() => {
                       setMenuOpen(false);
-                      // Open the existing DocumentViewer dialog at page 1 with
-                      // an empty excerpt — the highlight overlay treats that
-                      // as a no-op, so the user sees the bare page.
                       setActiveSource({ docId: doc.id, page: 1, excerpt: "" });
                     }}
                   />
@@ -283,7 +238,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
           </div>
         </div>
 
-        {/* Processing progress bar (only when status === "processing") */}
         {isProcessing && (
           <div className="mt-3">
             <div className="flex items-center justify-between text-xs mb-1">
@@ -308,7 +262,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
           </div>
         )}
 
-        {/* Footer (status + size + uploaded-at) */}
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/[0.05]">
           <div className="flex items-center gap-1.5">
             <StatusIcon
@@ -327,7 +280,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
           </div>
         </div>
 
-        {/* Tags */}
         {doc.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {doc.tags.map((tag) => (
@@ -343,7 +295,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
         )}
       </motion.div>
 
-      {/* ── Dialogs ────────────────────────────────────────────────────── */}
       <DocumentEditDialog
         open={editOpen}
         onOpenChange={setEditOpen}
@@ -369,10 +320,6 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
     </>
   );
 }
-
-/* ─────────────────────────────────────────────────────────────────────
- * Subcomponents
- * ────────────────────────────────────────────────────────────────── */
 
 function MenuItem({
   icon: Icon,
