@@ -1,42 +1,43 @@
 """
-PostgreSQL pgvector store — replaces the Qdrant backend.
+PostgreSQL vector store — plain SQL + in-Python cosine (no pgvector).
 
-All vectors live in the ``chunk_embeddings`` table alongside the rest of
-the application data in PostgreSQL.  No extra service to run, no port to
-expose, no .exe to download.
+All embeddings live in the ``chunk_embeddings`` table as JSON-encoded
+``TEXT``.  Similarity search fetches the candidate vectors for a workspace
+and ranks them in Python with NumPy.  This needs **zero PostgreSQL
+extensions**, so it runs on a vanilla install (including Windows) with no
+setup beyond the standard migrations.
 
-Schema (see alembic/versions/0006_add_chunk_embeddings.py):
-------------------------------------------------------------
-  chunk_embeddings
-    id            UUID PK
-    chunk_id      FK → chunks.id  ON DELETE CASCADE
-    document_id   FK → documents.id  ON DELETE CASCADE (for fast bulk deletes)
-    workspace_id  VARCHAR index
-    embedding     VECTOR(384)   — dense cosine embedding
-    created_at    TIMESTAMPTZ
+Performance note
+----------------
+For a local, single-workspace tool the corpus is small (hundreds to a few
+thousand chunks).  Brute-force cosine over a few thousand 384-dim vectors is
+sub-50ms.  If this ever needs to scale to hundreds of thousands of chunks,
+swap the embedding column to pgvector's ``VECTOR(384)`` and replace
+``cosine_search`` with an indexed ``<=>`` query — the public API here stays
+the same.
 
 Public API
 ----------
-  ensure_table()                          → no-op (migration owns schema)
-  upsert_embeddings(rows)                 → INSERT … ON CONFLICT DO UPDATE
-  delete_by_document_id(document_id, db)  → DELETE WHERE document_id = …
+  point_id_for(document_id, chunk_index)        → deterministic UUID5
+  upsert_embeddings(rows, db)                    → insert/replace embeddings
   cosine_search(query_vec, workspace_id, doc_ids, top_k, db) → list[hit]
+  delete_by_document_id(document_id, db)         → DELETE WHERE document_id = …
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
+from sqlalchemy import select
+
+from app.db.models import ChunkEmbedding
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
-
-# pgvector extension must exist in the DB (created by migration 0006).
-# The extension adds the <=> operator and VECTOR type.
 
 
 # ── ID derivation (kept identical to the old Qdrant scheme) ──────────────────
@@ -56,49 +57,57 @@ async def upsert_embeddings(
     """Insert or replace embedding rows.
 
     Each dict in ``rows`` must have:
-        chunk_id, document_id, workspace_id, embedding (list[float])
+        chunk_id, document_id, workspace_id, point_id, embedding (list[float])
 
-    Returns the number of rows upserted.
+    The embedding is JSON-encoded into the TEXT column.  Existing rows for the
+    same chunk_id are deleted first (dialect-agnostic upsert) so re-running the
+    pipeline is idempotent.
+
+    Returns the number of rows written.
     """
     if not rows:
         return 0
 
-    # Build a single multi-row INSERT … ON CONFLICT statement.
-    # We use raw SQL because SQLAlchemy's ORM layer doesn't yet support
-    # pgvector VECTOR literals natively without a custom type mapper.
-    values_clauses = []
-    params: dict = {}
+    chunk_ids = [r["chunk_id"] for r in rows]
 
-    for i, row in enumerate(rows):
-        vec_str = "[" + ",".join(str(v) for v in row["embedding"]) + "]"
-        values_clauses.append(
-            f"(:chunk_id_{i}::uuid, :doc_id_{i}::uuid, :ws_id_{i}, :point_id_{i}::uuid, "
-            f":vec_{i}::vector, NOW())"
+    # Delete any pre-existing embeddings for these chunks (idempotent re-runs).
+    existing = (await db.execute(
+        select(ChunkEmbedding).where(ChunkEmbedding.chunk_id.in_(chunk_ids))
+    )).scalars().all()
+    for row in existing:
+        await db.delete(row)
+    if existing:
+        await db.flush()
+
+    db.add_all([
+        ChunkEmbedding(
+            chunk_id=r["chunk_id"],
+            document_id=r["document_id"],
+            workspace_id=r["workspace_id"],
+            point_id=r["point_id"],
+            embedding=json.dumps(r["embedding"]),
         )
-        params[f"chunk_id_{i}"]  = row["chunk_id"]
-        params[f"doc_id_{i}"]    = row["document_id"]
-        params[f"ws_id_{i}"]     = row["workspace_id"]
-        params[f"point_id_{i}"]  = row["point_id"]
-        params[f"vec_{i}"]       = vec_str
+        for r in rows
+    ])
+    await db.flush()
 
-    sql = text(
-        "INSERT INTO chunk_embeddings "
-        "  (chunk_id, document_id, workspace_id, point_id, embedding, created_at) "
-        "VALUES " + ", ".join(values_clauses) + " "
-        "ON CONFLICT (chunk_id) DO UPDATE "
-        "  SET embedding = EXCLUDED.embedding, "
-        "      document_id = EXCLUDED.document_id, "
-        "      workspace_id = EXCLUDED.workspace_id, "
-        "      point_id = EXCLUDED.point_id, "
-        "      created_at = EXCLUDED.created_at"
-    )
-
-    await db.execute(sql, params)
     log.debug("upsert_embeddings: %d rows", len(rows))
     return len(rows)
 
 
-# ── Cosine similarity search ──────────────────────────────────────────────────
+# ── Cosine similarity search (in Python) ──────────────────────────────────────
+def _cosine(a: "list[float]", b: "list[float]") -> float:
+    """Cosine similarity of two equal-length vectors. Pure NumPy."""
+    import numpy as np
+
+    va = np.asarray(a, dtype=np.float32)
+    vb = np.asarray(b, dtype=np.float32)
+    denom = (np.linalg.norm(va) * np.linalg.norm(vb))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(va, vb) / denom)
+
+
 async def cosine_search(
     query_vec: list[float],
     workspace_id: str,
@@ -108,64 +117,59 @@ async def cosine_search(
 ) -> list[dict]:
     """Return the top_k most similar chunks for ``query_vec``.
 
-    Uses the pgvector ``<=>`` cosine-distance operator.  Distance is
-    converted to similarity score (1 − distance) so callers get a 0–1
-    score where 1 = identical.
+    Fetches all embeddings for the workspace (optionally restricted to a set
+    of document_ids), computes cosine similarity in Python, and returns the
+    highest-scoring rows.
 
     Returns a list of dicts with:
-        chunk_id, document_id, workspace_id, point_id, score
+        chunk_id, document_id, workspace_id, point_id, score (0–1)
     """
-    vec_str = "[" + ",".join(str(v) for v in query_vec) + "]"
+    import numpy as np
 
-    params: dict = {
-        "workspace_id": workspace_id,
-        "query_vec": vec_str,
-        "top_k": top_k,
-    }
-
-    doc_filter = ""
+    stmt = select(ChunkEmbedding).where(ChunkEmbedding.workspace_id == workspace_id)
     if document_ids:
-        doc_placeholders = ", ".join(f":doc_id_{i}" for i in range(len(document_ids)))
-        doc_filter = f"AND ce.document_id::text IN ({doc_placeholders})"
-        for i, doc_id in enumerate(document_ids):
-            params[f"doc_id_{i}"] = doc_id
+        stmt = stmt.where(ChunkEmbedding.document_id.in_(document_ids))
 
-    sql = text(
-        f"""
-        SELECT
-            ce.chunk_id::text,
-            ce.document_id::text,
-            ce.workspace_id,
-            ce.point_id::text,
-            1 - (ce.embedding <=> :query_vec::vector) AS score
-        FROM chunk_embeddings ce
-        WHERE ce.workspace_id = :workspace_id
-          {doc_filter}
-        ORDER BY ce.embedding <=> :query_vec::vector
-        LIMIT :top_k
-        """
-    )
+    candidates = (await db.execute(stmt)).scalars().all()
+    if not candidates:
+        return []
 
-    result = await db.execute(sql, params)
-    rows = result.fetchall()
+    q = np.asarray(query_vec, dtype=np.float32)
+    q_norm = float(np.linalg.norm(q))
+    if q_norm == 0.0:
+        return []
 
-    return [
-        {
-            "chunk_id":    row.chunk_id,
-            "document_id": row.document_id,
-            "workspace_id": row.workspace_id,
-            "point_id":    row.point_id,
-            "score":       float(row.score),
-        }
-        for row in rows
-    ]
+    scored: list[dict] = []
+    for ce in candidates:
+        try:
+            vec = json.loads(ce.embedding)
+        except (TypeError, ValueError):
+            log.warning("Skipping chunk_embedding %s with unparseable vector", ce.id)
+            continue
+        v = np.asarray(vec, dtype=np.float32)
+        v_norm = float(np.linalg.norm(v))
+        if v_norm == 0.0:
+            continue
+        score = float(np.dot(q, v) / (q_norm * v_norm))
+        scored.append({
+            "chunk_id":     ce.chunk_id,
+            "document_id":  ce.document_id,
+            "workspace_id": ce.workspace_id,
+            "point_id":     ce.point_id,
+            "score":        score,
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:top_k]
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 async def delete_by_document_id(document_id: str, db: "AsyncSession") -> None:
     """Remove all embedding rows for a document."""
-    await db.execute(
-        text("DELETE FROM chunk_embeddings WHERE document_id = :doc_id::uuid"),
-        {"doc_id": document_id},
-    )
-    log.info("pg_vector_store: deleted embeddings for document_id=%s", document_id)
+    rows = (await db.execute(
+        select(ChunkEmbedding).where(ChunkEmbedding.document_id == document_id)
+    )).scalars().all()
+    for row in rows:
+        await db.delete(row)
+    await db.flush()
+    log.info("pg_vector_store: deleted %d embeddings for document_id=%s", len(rows), document_id)

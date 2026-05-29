@@ -88,13 +88,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     EMBEDDING_DIMENSION: int = 384
 
-    # ── Vector search — PostgreSQL pgvector ───────────────────────
-    # Requires the pgvector extension in your PostgreSQL instance.
-    # Install: Ubuntu → sudo apt install postgresql-15-pgvector
-    #          macOS  → brew install pgvector
-    #          Docker → use pgvector/pgvector:pg15 image
-    # Migration 0006 runs CREATE EXTENSION IF NOT EXISTS vector automatically.
-    # No extra service or port needed — vectors live in the same PG database.
+    # ── Vector search — PostgreSQL (no extensions, no extra service) ──────────
+    # Embeddings are stored as JSON in the chunk_embeddings table and cosine
+    # similarity is computed in Python at query time (pg_vector_store.py).
+    # Works on a vanilla PostgreSQL install — no pgvector extension required.
 
     # ── Celery task queue ─────────────────────────────────────────
     # CELERY_TASK_ALWAYS_EAGER=true  → recommended for local dev on Windows

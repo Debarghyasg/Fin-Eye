@@ -224,9 +224,22 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         log.error("unhandled_exception", path=str(request.url), error=str(exc), exc_info=exc)
+        # FastAPI's generic Exception handler runs in Starlette's
+        # ServerErrorMiddleware, which sits OUTSIDE the CORSMiddleware — so the
+        # 500 response it produces normally has no Access-Control-Allow-Origin
+        # header. The browser then reports a *misleading* "blocked by CORS
+        # policy" error instead of the real 500, hiding the actual bug.
+        # We re-add the CORS headers here so real errors surface to the client.
+        headers: dict[str, str] = {}
+        origin = request.headers.get("origin")
+        if origin and origin in settings.cors_origins:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Access-Control-Allow-Credentials"] = "true"
+            headers["Vary"] = "Origin"
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "An unexpected error occurred. Please try again."},
+            headers=headers,
         )
 
     # ── Routers ───────────────────────────────────────────────────────────────
