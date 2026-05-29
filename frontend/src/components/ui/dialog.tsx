@@ -58,6 +58,10 @@ const DialogContent = React.forwardRef<
         ref={ref}
         className={cn(
           "fixed left-1/2 top-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2",
+          // Never exceed the viewport — keeps the modal centered and prevents
+          // the footer (action buttons) from being clipped off the bottom on
+          // short windows. Content scrolls internally when it's too tall.
+          "max-h-[90vh] overflow-y-auto",
           sizeClass,
           "gradient-card p-6 shadow-2xl",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
