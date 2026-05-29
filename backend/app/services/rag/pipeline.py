@@ -48,8 +48,13 @@ async def run_query_pipeline(
     t_start = time.perf_counter()
 
     # ── 1. Retrieve ───────────────────────────────────────────────────────────
+    # Over-fetch a wide candidate pool (RETRIEVER_TOP_K) so the cross-encoder
+    # re-ranker has enough recall to work with. ``request.top_k`` is the
+    # user-facing "how many sources to show" knob (default 5) and must NOT be
+    # used to limit retrieval depth — doing so collapses the funnel to 5 raw
+    # nearest-neighbours and the answer-bearing chunk is frequently missed.
     try:
-        candidates = await retrieve(request, db, top_k=request.top_k or settings.RETRIEVER_TOP_K)
+        candidates = await retrieve(request, db, top_k=settings.RETRIEVER_TOP_K)
     except Exception as exc:
         log.exception("Retrieval failed: %s", exc)
         raise RuntimeError(f"Retrieval failed: {exc}") from exc

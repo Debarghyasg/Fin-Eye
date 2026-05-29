@@ -45,14 +45,14 @@ import {
   type WorkspaceAnalytics,
 } from "@/lib/api";
 import { useAuth } from "@clerk/nextjs";
-import {
-  mockConfidenceTrend,
-  mockModelMix,
-  mockMostQueriedDocs,
-  mockQueryTypes,
-  mockQueryVolumeTrend,
-  mockTokenUsage,
-} from "@/lib/mock-data";
+// No preexisting/sample analytics. These series start empty; charts render
+// honest empty-states until the backend provides real per-day aggregates.
+const mockConfidenceTrend: Array<{ date: string; avg_confidence: number; p25: number; p75: number }> = [];
+const mockModelMix: Array<{ name: string; value: number; color: string }> = [];
+const mockMostQueriedDocs: Array<{ id: string; name: string; ticker: string; queries: number }> = [];
+const mockQueryTypes: Array<{ name: string; value: number; color: string }> = [];
+const mockQueryVolumeTrend: Array<{ date: string; queries: number; successful: number; failed: number }> = [];
+const mockTokenUsage: Array<{ date: string; prompt_tokens: number; completion_tokens: number; total: number }> = [];
 import { cn, formatNumber } from "@/lib/utils";
 import { useWorkspaceId } from "@/lib/use-workspace";
 
@@ -123,23 +123,17 @@ export default function AnalyticsPage() {
     staleTime: 60_000,
   });
 
-  // Aggregates: live values when available, else summed from the mock series.
+  // Aggregates: live values when available, else 0 (no sample fallback).
   const aggregates = useMemo(() => {
     const dyn = live?.analytics?.dynamodb;
     const pg = live?.analytics?.postgres;
 
-    const totalQueriesMock = mockQueryVolumeTrend.reduce((s, d) => s + d.queries, 0);
-    const totalTokensMock = mockTokenUsage.reduce((s, d) => s + d.total, 0);
-    const avgConfMock =
-      mockConfidenceTrend.reduce((s, d) => s + d.avg_confidence, 0) /
-      mockConfidenceTrend.length;
-
     return {
       totalQueries:
-        dyn?.total_queries ?? pg?.total_queries ?? totalQueriesMock,
+        dyn?.total_queries ?? pg?.total_queries ?? 0,
       avgConfidence:
-        dyn?.avg_confidence ?? pg?.avg_confidence ?? avgConfMock,
-      totalTokens: dyn?.total_tokens ?? totalTokensMock,
+        dyn?.avg_confidence ?? pg?.avg_confidence ?? 0,
+      totalTokens: dyn?.total_tokens ?? 0,
       avgLatencyMs: dyn?.avg_latency_ms ?? null,
       modelDistribution:
         dyn?.model_distribution ?? pg?.model_distribution ?? null,
@@ -205,7 +199,7 @@ export default function AnalyticsPage() {
               ) : (
                 <span className="text-emerald-300">
                   Live · aggregate stats from /analytics/audit/workspace/{workspaceId ?? "?"} (period: {live?.period_days ?? 30}d).
-                  Per-day time series remain mock until the analytics endpoint
+                  Per-day time series appear once the analytics endpoint
                   buckets by day.
                 </span>
               )
@@ -291,19 +285,13 @@ export default function AnalyticsPage() {
                   Last 30 days · successful vs failed
                 </p>
               </div>
-              <Badge variant="success" className="text-[10px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5" />
-                {(
-                  (mockQueryVolumeTrend.reduce((s, d) => s + d.successful, 0) /
-                    Math.max(
-                      1,
-                      mockQueryVolumeTrend.reduce((s, d) => s + d.queries, 0)
-                    )) *
-                  100
-                ).toFixed(1)}
-                % success
-              </Badge>
             </div>
+            {mockQueryVolumeTrend.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[240px] text-center">
+                <Zap className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No query activity yet</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={mockQueryVolumeTrend} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -314,6 +302,7 @@ export default function AnalyticsPage() {
                 <Bar dataKey="failed" stackId="q" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </motion.section>
 
           {/* Confidence trend */}
@@ -330,10 +319,13 @@ export default function AnalyticsPage() {
                   Daily mean with p25/p75 band
                 </p>
               </div>
-              <Badge variant="outline" className="text-[10px] text-emerald-300 border-emerald-500/30">
-                Trend ↑ +2.1%
-              </Badge>
             </div>
+            {mockConfidenceTrend.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[240px] text-center">
+                <TrendingUp className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No confidence data yet</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={mockConfidenceTrend} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -374,6 +366,7 @@ export default function AnalyticsPage() {
                 />
               </LineChart>
             </ResponsiveContainer>
+            )}
           </motion.section>
         </div>
 
@@ -397,6 +390,12 @@ export default function AnalyticsPage() {
                 Total: {formatNumber(mockTokenUsage.reduce((s, d) => s + d.total, 0))}
               </span>
             </div>
+            {mockTokenUsage.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[240px] text-center">
+                <Coins className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No token usage yet</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={mockTokenUsage} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
                 <defs>
@@ -423,6 +422,7 @@ export default function AnalyticsPage() {
                 <Bar dataKey="completion_tokens" stackId="t" fill="url(#tok-completion)" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </motion.section>
 
           {/* Query types donut */}
@@ -434,6 +434,13 @@ export default function AnalyticsPage() {
           >
             <h3 className="text-sm font-semibold mb-0.5">Query Types</h3>
             <p className="text-xs text-muted-foreground mb-4">Topic distribution</p>
+            {mockQueryTypes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[170px] text-center">
+                <BarChart3 className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No query data yet</p>
+              </div>
+            ) : (
+            <>
             <ResponsiveContainer width="100%" height={170}>
               <PieChart>
                 <Pie
@@ -476,6 +483,8 @@ export default function AnalyticsPage() {
                 </div>
               ))}
             </div>
+            </>
+            )}
           </motion.section>
         </div>
 
@@ -499,7 +508,13 @@ export default function AnalyticsPage() {
             </div>
 
             <div className="space-y-3">
-              {mockMostQueriedDocs.map((doc, i) => {
+              {mockMostQueriedDocs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <FileText className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-xs text-muted-foreground">No query data yet</p>
+                </div>
+              ) : (
+                mockMostQueriedDocs.map((doc, i) => {
                 const max = Math.max(...mockMostQueriedDocs.map((d) => d.queries));
                 const pct = (doc.queries / max) * 100;
                 return (
@@ -531,7 +546,8 @@ export default function AnalyticsPage() {
                     </div>
                   </motion.div>
                 );
-              })}
+              })
+              )}
             </div>
           </motion.section>
 
@@ -546,8 +562,15 @@ export default function AnalyticsPage() {
             <p className="text-xs text-muted-foreground mb-4">
               {aggregates.modelDistribution
                 ? "Live distribution from query_logs"
-                : "Demo distribution"}
+                : "No data yet"}
             </p>
+            {modelMixData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[170px] text-center">
+                <Activity className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No model usage yet</p>
+              </div>
+            ) : (
+            <>
             <ResponsiveContainer width="100%" height={170}>
               <PieChart>
                 <Pie
@@ -590,6 +613,8 @@ export default function AnalyticsPage() {
                 </div>
               ))}
             </div>
+            </>
+            )}
           </motion.section>
         </div>
 

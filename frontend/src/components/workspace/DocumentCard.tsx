@@ -183,7 +183,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                 setMenuOpen(!menuOpen);
               }}
               aria-label="Document menu"
-              className="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 rounded-md hover:bg-white/10 flex items-center justify-center"
+              className="opacity-70 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 transition-opacity w-7 h-7 rounded-md hover:bg-white/10 flex items-center justify-center"
             >
               <MoreVertical className="w-3.5 h-3.5 text-muted-foreground" />
             </button>

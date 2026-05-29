@@ -362,24 +362,10 @@ export default function AlertsPage() {
   const mockMarkRead = useAppStore((s) => s.markAlertRead);
   const mockMarkAllRead = useAppStore((s) => s.markAllAlertsRead);
 
-  const [mockSubs, setMockSubs] = useState<TickerSubscription[]>(() =>
-    mockSubscriptions.map((s, i) => ({
-      id: `mock-sub-${i}`,
-      user_id: "demo-user",
-      workspace_id: effectiveWorkspaceId,
-      ticker: s.ticker,
-      company_name: s.company,
-      subscribe_anomaly: s.anomaly,
-      subscribe_sentiment: s.sentiment,
-      subscribe_filing: s.filing,
-      subscribe_regulatory: s.regulatory,
-      email_notifications: true,
-      active: s.active,
-      last_edgar_check_at: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }))
-  );
+  // Start with no preexisting subscriptions. In live mode the list is
+  // populated from /alerts/subscriptions; in demo mode it stays empty until
+  // the user adds a ticker via the dialog.
+  const [mockSubs, setMockSubs] = useState<TickerSubscription[]>([]);
 
   // ── Live-mode queries (no-op when IS_LIVE_API is false) ───────────────
   const liveAlertsQuery = useQuery<AlertListResponse, ApiError>({
