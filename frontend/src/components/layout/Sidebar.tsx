@@ -29,9 +29,10 @@ const bottomItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { sidebarCollapsed, setSidebarCollapsed, alerts } = useAppStore();
+  const { sidebarCollapsed, setSidebarCollapsed, alerts, documents } = useAppStore();
   const { signOut } = useClerk();
   const unread = alerts.filter((a) => !a.read).length;
+  const indexedCount = documents.filter((d) => d.status === "indexed").length;
 
   const handleSignOut = async () => {
     await signOut();
@@ -163,7 +164,9 @@ export function Sidebar() {
                   <div className="w-1.5 h-1.5 rounded-full bg-fin-400 animate-pulse" />
                   <span className="text-xs text-fin-300 font-medium">AI Pipeline Live</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5">5 docs indexed · 3ms p99</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {indexedCount} doc{indexedCount === 1 ? "" : "s"} indexed
+                </p>
               </motion.div>
             )}
           </AnimatePresence>

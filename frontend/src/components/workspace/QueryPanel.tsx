@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Sparkles, Copy, ThumbsUp, ThumbsDown, Loader2,
-  BookOpen, Filter, X,
+  BookOpen, Filter, X, Trash2,
 } from "lucide-react";
 import { useAuth } from "@clerk/nextjs";
 
@@ -85,7 +85,7 @@ function adaptQueryResponse(r: QueryResponse): QueryEntry {
   } as QueryEntry;
 }
 
-function QueryBubble({ entry }: { entry: QueryEntry }) {
+function QueryBubble({ entry, onDelete }: { entry: QueryEntry; onDelete: (id: string) => void }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(entry.answer);
@@ -140,6 +140,14 @@ function QueryBubble({ entry }: { entry: QueryEntry }) {
               </button>
               <button className="p-1 rounded hover:bg-white/5 text-muted-foreground hover:text-red-400 transition-colors">
                 <ThumbsDown className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => onDelete(entry.id)}
+                aria-label="Delete this message"
+                title="Delete this message"
+                className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
               </button>
             </div>
           </div>
@@ -239,6 +247,8 @@ export function QueryPanel() {
   const [showSuggestions, setShowSuggestions] = useState(true);
   const queryHistory = useAppStore((s) => s.queryHistory);
   const addQuery = useAppStore((s) => s.addQuery);
+  const removeQuery = useAppStore((s) => s.removeQuery);
+  const clearQueries = useAppStore((s) => s.clearQueries);
   const isQuerying = useAppStore((s) => s.isQuerying);
   const setIsQuerying = useAppStore((s) => s.setIsQuerying);
   const selectedDocIds = useAppStore((s) => s.selectedDocIds);
@@ -312,6 +322,22 @@ export function QueryPanel() {
     <div className="flex flex-col h-full">
       <SelectionBar />
 
+      {/* Conversation toolbar — clear all (only when there's history) */}
+      {queryHistory.length > 0 && (
+        <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.07]">
+          <span className="text-[11px] text-muted-foreground">
+            {queryHistory.length} message{queryHistory.length === 1 ? "" : "s"}
+          </span>
+          <button
+            onClick={() => clearQueries()}
+            className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-red-400 transition-colors"
+          >
+            <Trash2 className="w-3 h-3" />
+            Clear all
+          </button>
+        </div>
+      )}
+
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
         {queryHistory.length === 0 && (
@@ -330,9 +356,18 @@ export function QueryPanel() {
           </motion.div>
         )}
 
-        {queryHistory.map((entry) => (
-          <QueryBubble key={entry.id} entry={entry} />
-        ))}
+        <AnimatePresence initial={false}>
+          {queryHistory.map((entry) => (
+            <motion.div
+              key={entry.id}
+              layout
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <QueryBubble entry={entry} onDelete={removeQuery} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
 
         {/* Typing indicator */}
         <AnimatePresence>

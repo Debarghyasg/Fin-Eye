@@ -17,7 +17,7 @@ import React, { useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, FileText, ExternalLink, Sparkles, Hash,
-  TrendingUp, Loader2, ChevronRight,
+  TrendingUp, Loader2, ChevronRight, PanelRightClose,
 } from "lucide-react";
 import { cn, relativeTime } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -52,6 +52,7 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
   const documents = useAppStore((s) => s.documents);
   const setActiveSource = useAppStore((s) => s.setActiveSource);
   const isQuerying = useAppStore((s) => s.isQuerying);
+  const setSourcesPanelOpen = useAppStore((s) => s.setSourcesPanelOpen);
 
   // Most recent query result drives the panel
   const latest = queryHistory[0];
@@ -74,7 +75,7 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
   const showLoading = loading || isQuerying;
 
   return (
-    <aside className="w-[380px] flex-shrink-0 border-l border-white/[0.07] bg-card/40 flex flex-col h-full">
+    <aside className="w-[300px] xl:w-[380px] flex-shrink-0 border-l border-white/[0.07] bg-card/40 flex flex-col h-full">
       {/* Header */}
       <div className="px-4 h-12 border-b border-white/[0.07] flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -92,11 +93,21 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
             </p>
           </div>
         </div>
-        {latest && !showLoading && (
-          <span className="text-[10px] text-muted-foreground">
-            {relativeTime(latest.timestamp)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {latest && !showLoading && (
+            <span className="text-[10px] text-muted-foreground">
+              {relativeTime(latest.timestamp)}
+            </span>
+          )}
+          <button
+            onClick={() => setSourcesPanelOpen(false)}
+            aria-label="Hide sources panel"
+            title="Hide sources panel"
+            className="w-6 h-6 rounded-md hover:bg-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <PanelRightClose className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Body */}
