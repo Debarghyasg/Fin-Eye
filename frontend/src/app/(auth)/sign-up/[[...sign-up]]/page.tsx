@@ -65,7 +65,7 @@ export default function SignUpPage() {
             alt="Fin-Sight"
             width={44}
             height={44}
-            className="drop-shadow-[0_0_15px_rgba(34,162,105,0.4)]"
+            className="drop-shadow-[0_0_15px_rgba(245,166,35,0.4)]"
             priority
           />
           <span className="text-xl font-bold tracking-tight">
@@ -143,8 +143,8 @@ export default function SignUpPage() {
             fallbackRedirectUrl="/dashboard"
             appearance={{
               variables: {
-                colorPrimary: "#22a269",
-                colorBackground: "hsl(222 47% 7%)",
+                colorPrimary: "#f5a623",
+                colorBackground: "hsl(0 0% 11%)",
                 colorInputBackground: "rgba(255,255,255,0.04)",
                 colorText: "#f8fafc",
                 colorTextSecondary: "#94a3b8",

@@ -4,26 +4,26 @@
 
 @layer base {
   :root {
-    --background: 222 47% 5%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 7%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 7%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 158 60% 40%;
+    --background: 0 0% 4%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 38 91% 55%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 222 40% 12%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 222 40% 12%;
-    --muted-foreground: 215 20% 55%;
-    --accent: 158 50% 15%;
-    --accent-foreground: 158 60% 70%;
-    --destructive: 0 62% 50%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 222 35% 14%;
-    --input: 222 35% 14%;
-    --ring: 158 60% 40%;
-    --radius: 0.75rem;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 220 9% 65%;
+    --accent: 38 45% 13%;
+    --accent-foreground: 38 90% 65%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 38 91% 55%;
+    --radius: 0.875rem;
   }
 }
 
@@ -34,9 +34,9 @@
   body {
     @apply bg-background text-foreground antialiased;
     background-image: 
-      radial-gradient(at 20% 10%, hsla(158, 60%, 15%, 0.25) 0px, transparent 60%),
-      radial-gradient(at 85% 5%, hsla(222, 60%, 10%, 0.3) 0px, transparent 50%),
-      radial-gradient(at 50% 90%, hsla(158, 40%, 10%, 0.2) 0px, transparent 50%);
+      radial-gradient(at 20% 10%, hsla(38, 90%, 22%, 0.16) 0px, transparent 60%),
+      radial-gradient(at 85% 5%, hsla(0, 0%, 8%, 0.45) 0px, transparent 50%),
+      radial-gradient(at 50% 90%, hsla(38, 70%, 16%, 0.10) 0px, transparent 50%);
     background-attachment: fixed;
   }
   html {
@@ -48,14 +48,14 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: hsl(222 47% 7%);
+    background: hsl(0 0% 8%);
   }
   ::-webkit-scrollbar-thumb {
-    background: hsl(222 35% 20%);
+    background: hsl(0 0% 22%);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(158 60% 35%);
+    background: hsl(38 80% 45%);
   }
 }
 
@@ -67,13 +67,13 @@
     @apply hover:bg-white/[0.07] hover:border-white/[0.12] transition-all duration-300;
   }
   .glow-green {
-    box-shadow: 0 0 20px rgba(34, 162, 105, 0.3), 0 0 60px rgba(34, 162, 105, 0.1);
+    box-shadow: 0 0 20px rgba(245, 166, 35, 0.3), 0 0 60px rgba(245, 166, 35, 0.1);
   }
   .glow-green-sm {
-    box-shadow: 0 0 10px rgba(34, 162, 105, 0.2);
+    box-shadow: 0 0 10px rgba(245, 166, 35, 0.2);
   }
   .text-gradient {
-    @apply bg-gradient-to-r from-fin-400 via-fin-300 to-emerald-400 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-fin-300 via-fin-400 to-fin-500 bg-clip-text text-transparent;
   }
   .text-gradient-white {
     @apply bg-gradient-to-r from-white via-white/90 to-white/70 bg-clip-text text-transparent;
@@ -98,7 +98,7 @@
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, rgba(34,162,105,0.4), rgba(34,162,105,0.1), transparent);
+    background: linear-gradient(135deg, rgba(245,166,35,0.4), rgba(245,166,35,0.1), transparent);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
@@ -133,7 +133,7 @@
 /* Gradient border card */
 .gradient-card {
   position: relative;
-  background: hsl(222 47% 7%);
+  background: hsl(0 0% 11%);
   border-radius: var(--radius);
   overflow: hidden;
 }
@@ -143,7 +143,7 @@
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(34,162,105,0.5) 0%, rgba(34,162,105,0.1) 50%, transparent 100%);
+  background: linear-gradient(135deg, rgba(245,166,35,0.5) 0%, rgba(245,166,35,0.1) 50%, transparent 100%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -158,12 +158,12 @@
  * highlighted phrase is unmistakable but readable.
  */
 .phase4-cite-highlight {
-  background: rgba(34, 162, 105, 0.32) !important;
-  color: hsl(210 40% 98%) !important;
+  background: rgba(245, 166, 35, 0.30) !important;
+  color: hsl(0 0% 100%) !important;
   border-radius: 2px;
   box-shadow:
-    0 0 0 1px rgba(34, 162, 105, 0.55),
-    0 0 12px rgba(34, 162, 105, 0.35);
+    0 0 0 1px rgba(245, 166, 35, 0.55),
+    0 0 12px rgba(245, 166, 35, 0.35);
   padding: 0 1px;
   /* Animate the highlight in so it's discoverable */
   animation: phase4-highlight-pulse 1.4s ease-out;
@@ -171,16 +171,16 @@
 
 @keyframes phase4-highlight-pulse {
   0% {
-    background: rgba(34, 162, 105, 0.7);
+    background: rgba(245, 166, 35, 0.7);
     box-shadow:
-      0 0 0 2px rgba(34, 162, 105, 0.85),
-      0 0 24px rgba(34, 162, 105, 0.55);
+      0 0 0 2px rgba(245, 166, 35, 0.85),
+      0 0 24px rgba(245, 166, 35, 0.55);
   }
   100% {
-    background: rgba(34, 162, 105, 0.32);
+    background: rgba(245, 166, 35, 0.30);
     box-shadow:
-      0 0 0 1px rgba(34, 162, 105, 0.55),
-      0 0 12px rgba(34, 162, 105, 0.35);
+      0 0 0 1px rgba(245, 166, 35, 0.55),
+      0 0 12px rgba(245, 166, 35, 0.35);
   }
 }
 
@@ -190,5 +190,5 @@
   color: transparent;
 }
 .react-pdf__Page__textContent span.phase4-cite-highlight {
-  color: hsl(210 40% 98%) !important;
+  color: hsl(0 0% 100%) !important;
 }

@@ -64,9 +64,9 @@ function VolumeTooltip({ active, payload, label }: any) {
   );
 }
 
-const CHART_COLORS = ["#22a269", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645"];
+const CHART_COLORS = ["#22c55e", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645"];
 const TICKER_COLORS: Record<string, string> = {
-  AAPL: "#22a269",
+  AAPL: "#22c55e",
   MSFT: "#3b82f6",
   GOOGL: "#f59e0b",
   JPM: "#8b5cf6",
@@ -217,7 +217,7 @@ function PipelineStatus({
 }
 
 /* ── Helper functions (replaces IIFEs to avoid SWC parse bug) ── */
-const DOC_TYPE_COLORS = ["#22a269", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645", "#3b82f6"];
+const DOC_TYPE_COLORS = ["#22c55e", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645", "#3b82f6"];
 
 function buildDocTypeData(documents: ReturnType<typeof useAppStore>["documents"] extends (infer T)[] ? T[] : never[]) {
   const counts = new Map<string, number>();
@@ -500,7 +500,7 @@ export default function DashboardPage() {
                     <Tooltip
                       formatter={(value: number) => [`${value}%`, ""]}
                       contentStyle={{
-                        background: "hsl(222 47% 7%)",
+                        background: "hsl(0 0% 11%)",
                         border: "1px solid rgba(255,255,255,0.08)",
                         borderRadius: 8,
                         fontSize: 11,
@@ -554,7 +554,7 @@ export default function DashboardPage() {
                   <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
                   <Tooltip content={<VolumeTooltip />} />
-                  <Bar dataKey="successful" stackId="a" fill="#22a269" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="successful" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="failed" stackId="a" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

@@ -144,7 +144,7 @@ export default function AnalyticsPage() {
 
   // Model distribution donut — derive from live data if present
   const modelMixData = useMemo(() => {
-    const palette = ["#22a269", "#47be85", "#7dd8ab", "#3b82f6", "#f59e0b", "#94a3b8"];
+    const palette = ["#22c55e", "#47be85", "#7dd8ab", "#3b82f6", "#f59e0b", "#94a3b8"];
     if (aggregates.modelDistribution) {
       const total =
         Object.values(aggregates.modelDistribution).reduce((a, b) => a + b, 0) || 1;
@@ -296,7 +296,7 @@ export default function AnalyticsPage() {
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} interval={4} />
                 <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="successful" stackId="q" fill="#22a269" />
+                <Bar dataKey="successful" stackId="q" fill="#22c55e" />
                 <Bar dataKey="failed" stackId="q" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -343,21 +343,21 @@ export default function AnalyticsPage() {
                 <Line
                   type="monotone"
                   dataKey="p75"
-                  stroke="rgba(34,162,105,0.15)"
+                  stroke="rgba(34,197,94,0.15)"
                   strokeWidth={1}
                   dot={false}
                 />
                 <Line
                   type="monotone"
                   dataKey="p25"
-                  stroke="rgba(34,162,105,0.15)"
+                  stroke="rgba(34,197,94,0.15)"
                   strokeWidth={1}
                   dot={false}
                 />
                 <Line
                   type="monotone"
                   dataKey="avg_confidence"
-                  stroke="#22a269"
+                  stroke="#22c55e"
                   strokeWidth={2.5}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -402,8 +402,8 @@ export default function AnalyticsPage() {
                     <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.55} />
                   </linearGradient>
                   <linearGradient id="tok-completion" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#22a269" stopOpacity={0.85} />
-                    <stop offset="100%" stopColor="#22a269" stopOpacity={0.55} />
+                    <stop offset="0%" stopColor="#22c55e" stopOpacity={0.85} />
+                    <stop offset="100%" stopColor="#22c55e" stopOpacity={0.55} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -459,7 +459,7 @@ export default function AnalyticsPage() {
                 <Tooltip
                   formatter={(value: number) => [`${value}%`, ""]}
                   contentStyle={{
-                    background: "hsl(222 47% 7%)",
+                    background: "hsl(0 0% 11%)",
                     border: "1px solid rgba(255,255,255,0.08)",
                     borderRadius: 8,
                     fontSize: 11,
@@ -587,7 +587,7 @@ export default function AnalyticsPage() {
                 <Tooltip
                   formatter={(value: number) => [`${value}%`, ""]}
                   contentStyle={{
-                    background: "hsl(222 47% 7%)",
+                    background: "hsl(0 0% 11%)",
                     border: "1px solid rgba(255,255,255,0.08)",
                     borderRadius: 8,
                     fontSize: 11,

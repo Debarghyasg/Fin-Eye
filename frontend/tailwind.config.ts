@@ -48,19 +48,19 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // FinSight brand
+        // FinSight brand — golden amber (dominant accent)
         fin: {
-          50:  "#eefbf3",
-          100: "#d6f5e3",
-          200: "#b0eacb",
-          300: "#7dd8ab",
-          400: "#47be85",
-          500: "#22a269",
-          600: "#168254",
-          700: "#136745",
-          800: "#115238",
-          900: "#0f432f",
-          950: "#07261b",
+          50:  "#fef7e7",
+          100: "#fce9c2",
+          200: "#f9d489",
+          300: "#f6bd4f",
+          400: "#f5a623",
+          500: "#e09520",
+          600: "#bd7917",
+          700: "#975c15",
+          800: "#7c4a18",
+          900: "#693e18",
+          950: "#3c200a",
         },
       },
       borderRadius: {
@@ -94,8 +94,8 @@ const config: Config = {
           to: { backgroundPosition: "200% 0" },
         },
         "pulse-glow": {
-          "0%, 100%": { boxShadow: "0 0 0 0 rgba(34,162,105,0.4)" },
-          "50%": { boxShadow: "0 0 0 8px rgba(34,162,105,0)" },
+          "0%, 100%": { boxShadow: "0 0 0 0 rgba(245,166,35,0.4)" },
+          "50%": { boxShadow: "0 0 0 8px rgba(245,166,35,0)" },
         },
         float: {
           "0%, 100%": { transform: "translateY(0px)" },
@@ -142,7 +142,7 @@ const config: Config = {
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
         "gradient-mesh":
-          "radial-gradient(at 40% 20%, hsla(158,60%,30%,0.3) 0px, transparent 50%), radial-gradient(at 80% 0%, hsla(158,40%,20%,0.2) 0px, transparent 50%), radial-gradient(at 0% 50%, hsla(158,60%,20%,0.2) 0px, transparent 50%)",
+          "radial-gradient(at 40% 20%, hsla(38,90%,30%,0.22) 0px, transparent 50%), radial-gradient(at 80% 0%, hsla(38,70%,22%,0.16) 0px, transparent 50%), radial-gradient(at 0% 50%, hsla(38,80%,20%,0.16) 0px, transparent 50%)",
       },
     },
   },

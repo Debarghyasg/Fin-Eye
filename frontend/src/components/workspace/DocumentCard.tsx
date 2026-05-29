@@ -105,7 +105,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
         className={cn(
           "relative rounded-xl border p-4 cursor-pointer transition-all duration-200 group",
           active
-            ? "border-fin-500/40 bg-fin-500/10 shadow-[0_0_20px_rgba(34,162,105,0.1)]"
+            ? "border-fin-500/40 bg-fin-500/10 shadow-[0_0_20px_rgba(245,166,35,0.1)]"
             : isSelected
               ? "border-fin-500/30 bg-fin-500/5"
               : "border-white/[0.07] bg-card hover:border-white/[0.14] hover:bg-white/[0.03]",
