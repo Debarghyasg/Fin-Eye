@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -70,9 +71,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (!IS_LIVE_API) {
-        return undefined;
-      }
+      if (!IS_LIVE_API) return undefined;
       await deleteDocument(doc.id, getToken);
     },
     onSuccess: () => {
@@ -367,25 +366,33 @@ function DeleteConfirmDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="sm">
+        {/* Header — pinned, never scrolls */}
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="w-3.5 h-3.5 text-red-400" />
             Delete document?
           </DialogTitle>
-          <DialogDescription>
-            This permanently removes <span className="text-foreground">{document.name}</span>{" "}
-            and all of its extracted chunks from the workspace. The vector index entries
-            and stored file are deleted too. This cannot be undone.
-          </DialogDescription>
         </DialogHeader>
 
-        {error && (
-          <div className="flex items-start gap-2 py-2 px-3 rounded-md bg-red-500/5 border border-red-500/20 text-xs">
-            <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
-            <span className="text-red-300">{error}</span>
-          </div>
-        )}
+        {/* Body — scrolls if content is tall */}
+        <DialogBody>
+          <DialogDescription className="mb-3">
+            This permanently removes{" "}
+            <span className="text-foreground font-medium">{document.name}</span>{" "}
+            and all of its extracted chunks from the workspace. The vector
+            index entries and stored file are deleted too. This cannot be
+            undone.
+          </DialogDescription>
 
+          {error && (
+            <div className="flex items-start gap-2 py-2 px-3 rounded-md bg-red-500/5 border border-red-500/20 text-xs">
+              <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+              <span className="text-red-300">{error}</span>
+            </div>
+          )}
+        </DialogBody>
+
+        {/* Footer — pinned, always visible */}
         <DialogFooter>
           <Button
             type="button"

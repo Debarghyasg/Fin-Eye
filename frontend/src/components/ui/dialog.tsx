@@ -1,11 +1,6 @@
 "use client";
 /**
  * Dialog primitive — wraps @radix-ui/react-dialog with the Fin-Sight dark theme.
- *
- * Used by:
- *   - Document viewer (PDF preview at a cited page)
- *   - Add-ticker subscription modal
- *   - Future confirm dialogs
  */
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
@@ -38,30 +33,32 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
-    /** Suppress the default close X button (e.g. when content owns its own chrome). */
     hideClose?: boolean;
-    /** Width preset — defaults to "md" (max-w-lg). Use "xl" for the doc viewer. */
     size?: "sm" | "md" | "lg" | "xl" | "full";
   }
 >(({ className, children, hideClose, size = "md", ...props }, ref) => {
   const sizeClass = {
-    sm: "max-w-md",
-    md: "max-w-lg",
-    lg: "max-w-2xl",
-    xl: "max-w-5xl",
+    sm:   "max-w-md",
+    md:   "max-w-lg",
+    lg:   "max-w-2xl",
+    xl:   "max-w-5xl",
     full: "max-w-[90vw] h-[90vh]",
   }[size];
+
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2",
-          // Never exceed the viewport — keeps the modal centered and prevents
-          // the footer (action buttons) from being clipped off the bottom on
-          // short windows. Content scrolls internally when it's too tall.
-          "max-h-[90vh] overflow-y-auto",
+          // Positioning
+          "fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2",
+          // ↓ KEY FIX: flex column so the footer is always visible.
+          //   The body area (DialogDescription / error banner) scrolls;
+          //   the header and footer are pinned inside the modal bounds.
+          "flex flex-col",
+          // Height cap — never taller than 90 % of the viewport
+          "max-h-[90vh]",
           sizeClass,
           "gradient-card p-6 shadow-2xl",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
@@ -85,13 +82,27 @@ const DialogContent = React.forwardRef<
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col space-y-1.5 text-left mb-4", className)} {...props} />
+  <div className={cn("flex flex-col space-y-1.5 text-left mb-4 flex-shrink-0", className)} {...props} />
 );
 DialogHeader.displayName = "DialogHeader";
 
+/**
+ * DialogBody — NEW: scrollable middle section.
+ * Wrap the variable-height content (description, error banners, lists)
+ * inside <DialogBody> so only that region scrolls while the header and
+ * footer stay pinned.
+ */
+const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex-1 overflow-y-auto min-h-0", className)} {...props} />
+);
+DialogBody.displayName = "DialogBody";
+
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 gap-2 mt-4", className)}
+    className={cn(
+      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 gap-2 mt-4 flex-shrink-0",
+      className,
+    )}
     {...props}
   />
 );
@@ -123,6 +134,7 @@ DialogDescription.displayName = DialogPrimitive.Description.displayName;
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
