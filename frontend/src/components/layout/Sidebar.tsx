@@ -1,16 +1,17 @@
 "use client";
 import React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import {
   LayoutDashboard, FileText, GitCompare, Bell, Settings,
-  ChevronLeft, ChevronRight, BarChart3, Shield,
+  ChevronLeft, ChevronRight, BarChart3, Shield, LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { useClerk } from "@clerk/nextjs";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -27,8 +28,15 @@ const bottomItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { sidebarCollapsed, setSidebarCollapsed, unreadCount, alerts } = useAppStore();
+  const router = useRouter();
+  const { sidebarCollapsed, setSidebarCollapsed, alerts } = useAppStore();
+  const { signOut } = useClerk();
   const unread = alerts.filter((a) => !a.read).length;
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push("/sign-in");
+  };
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -40,7 +48,6 @@ export function Sidebar() {
         {/* Logo */}
         <Link href="/dashboard" className="flex items-center h-16 px-4 border-b border-white/[0.07]">
           <div className="flex items-center gap-2.5 min-w-0">
-            {/* Mark only — always visible */}
             <div className="relative flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center">
               <Image
                 src="/logo-mark.svg"
@@ -96,7 +103,7 @@ export function Sidebar() {
                     />
                   )}
                   <div className="relative z-10 flex-shrink-0">
-                    <Icon className="w-4.5 h-4.5 w-[18px] h-[18px]" />
+                    <Icon className="w-[18px] h-[18px]" />
                     {isAlerts && unread > 0 && (
                       <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-fin-500 text-[9px] font-bold flex items-center justify-center text-white leading-none">
                         {unread}
@@ -195,6 +202,30 @@ export function Sidebar() {
             }
             return link;
           })}
+
+          {/* Sign Out */}
+          {sidebarCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleSignOut}
+                  className="w-full flex items-center justify-center rounded-lg px-2.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors duration-200"
+                >
+                  <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Sign Out</TooltipContent>
+            </Tooltip>
+          ) : (
+            <motion.button
+              whileHover={{ x: 2 }}
+              onClick={handleSignOut}
+              className="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors duration-200"
+            >
+              <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+              <span className="whitespace-nowrap">Sign Out</span>
+            </motion.button>
+          )}
         </div>
 
         {/* Collapse toggle */}
