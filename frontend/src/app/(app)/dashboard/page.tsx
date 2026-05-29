@@ -26,11 +26,9 @@ import {
   type PipelineHealthResponse,
   type PipelineStageStatus,
 } from "@/lib/api";
-import {
-  mockRevenueData, mockQueryVolumeData, mockDocTypeData, mockAlerts, mockDocuments,
-} from "@/lib/mock-data";
 import { cn, formatNumber, relativeTime, truncate } from "@/lib/utils";
 import { useWorkspaceId } from "@/lib/use-workspace";
+import { useAppStore } from "@/store/useAppStore";
 
 /* ── Recharts custom tooltip ───────────────────────────────── */
 function CustomTooltip({ active, payload, label }: any) {
@@ -75,13 +73,24 @@ const TICKER_COLORS: Record<string, string> = {
 
 /* ── Recent activity feed ──────────────────────────────────── */
 function ActivityFeed() {
-  const items = [
-    { icon: FileText, color: "text-fin-400 bg-fin-500/10", text: "Apple 10-K FY2023 indexed", time: "2h ago", tag: "Indexed" },
-    { icon: Sparkles, color: "text-blue-400 bg-blue-500/10", text: "Cross-document query executed", time: "3h ago", tag: "Query" },
-    { icon: AlertTriangle, color: "text-amber-400 bg-amber-500/10", text: "Anomaly detected in AAPL R&D", time: "5h ago", tag: "Alert" },
-    { icon: Shield, color: "text-violet-400 bg-violet-500/10", text: "PII scan passed on JPM upload", time: "1d ago", tag: "Security" },
-    { icon: BarChart3, color: "text-emerald-400 bg-emerald-500/10", text: "Comparison report generated", time: "1d ago", tag: "Compare" },
-  ];
+  // No fabricated activity. A real feed would be wired to a backend
+  // events endpoint; until then, render an honest empty state.
+  const items: Array<{
+    icon: React.ElementType;
+    color: string;
+    text: string;
+    time: string;
+    tag: string;
+  }> = [];
+
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 text-center">
+        <Activity className="w-8 h-8 text-muted-foreground/30 mb-2" />
+        <p className="text-xs text-muted-foreground">No recent activity yet</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-1">
@@ -236,16 +245,55 @@ export default function DashboardPage() {
     staleTime: 15_000,
   });
 
-  // Mock fallbacks when live mode is off, the request errors, or a workspace
-  // hasn't been picked yet. Each card still has a sensible value.
+  // Real values only. When live stats haven't loaded (or no backend), fall
+  // back to the in-memory store — which starts empty — never to sample data.
+  const storeDocuments = useAppStore((s) => s.documents);
+  const storeAlerts = useAppStore((s) => s.alerts);
   const indexedDocs = statsQuery.data
     ? statsQuery.data.indexed
-    : mockDocuments.filter((d) => d.status === "indexed").length;
+    : storeDocuments.filter((d) => d.status === "indexed").length;
   const totalDocs = statsQuery.data?.total_documents ?? null;
-  const totalQueries = statsQuery.data ? statsQuery.data.total_queries : 1307;
+  const totalQueries = statsQuery.data ? statsQuery.data.total_queries : 0;
   const totalChunks = statsQuery.data ? statsQuery.data.total_chunks : null;
   const failedDocs = statsQuery.data ? statsQuery.data.failed : null;
-  const activeAlerts = mockAlerts.filter((a) => !a.read).length;
+  const activeAlerts = storeAlerts.filter((a) => !a.read).length;
+
+  // "Most Queried Documents" — derived from the real workspace documents.
+  // We don't have a per-doc query counter client-side, so show indexed docs
+  // ordered by chunk count as a proxy; empty until the user uploads.
+  const _indexedForTop = [...storeDocuments]
+    .filter((d) => d.status === "indexed")
+    .sort((a, b) => (b.chunkCount ?? 0) - (a.chunkCount ?? 0))
+    .slice(0, 4);
+  const _maxChunks = Math.max(1, ..._indexedForTop.map((d) => d.chunkCount ?? 0));
+  const topDocuments = _indexedForTop.map((d) => ({
+    name: d.name,
+    ticker: d.ticker,
+    queries: d.chunkCount ?? 0,
+    pct: Math.round(((d.chunkCount ?? 0) / _maxChunks) * 100),
+  }));
+
+  // ── Chart datasets — real-only, no sample portfolio numbers ───────────
+  // Quarterly revenue and weekly query-volume are not derivable client-side
+  // without dedicated backend endpoints, so they start empty and show an
+  // honest empty-state instead of fabricated AAPL/MSFT figures.
+  const revenueData: Array<Record<string, number | string>> = [];
+  const queryVolumeData: Array<{ day: string; successful: number; failed: number }> = [];
+
+  // Document-type breakdown is genuinely derivable from the workspace docs.
+  const DOC_TYPE_COLORS = ["#22a269", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645", "#3b82f6"];
+  const docTypeData = (() => {
+    const counts = new Map<string, number>();
+    for (const d of storeDocuments) {
+      counts.set(d.type, (counts.get(d.type) ?? 0) + 1);
+    }
+    const total = storeDocuments.length || 1;
+    return Array.from(counts.entries()).map(([name, n], i) => ({
+      name,
+      value: Math.round((n / total) * 100),
+      color: DOC_TYPE_COLORS[i % DOC_TYPE_COLORS.length],
+    }));
+  })();
 
   const stagesForRender: PipelineStageStatus[] = pipelineQuery.data?.stages?.length
     ? pipelineQuery.data.stages
@@ -279,16 +327,13 @@ export default function DashboardPage() {
             title="Documents Indexed"
             value={statsQuery.isLoading ? "…" : formatNumber(indexedDocs)}
             unit={totalDocs != null ? `of ${formatNumber(totalDocs)}` : "files"}
-            change={12.5}
-            changeLabel="vs last week"
             icon={Database}
             index={0}
           />
           <StatCard
-            title={statsQuery.data ? "Total Queries" : "Queries Today"}
+            title={statsQuery.data ? "Total Queries" : "Queries"}
             value={statsQuery.isLoading ? "…" : formatNumber(totalQueries)}
-            change={18.3}
-            changeLabel={statsQuery.data ? "lifetime" : "vs yesterday"}
+            changeLabel={statsQuery.data ? "lifetime" : undefined}
             icon={Zap}
             iconColor="text-blue-400"
             iconBg="bg-blue-500/10"
@@ -301,11 +346,9 @@ export default function DashboardPage() {
                 ? "…"
                 : statsQuery.data
                   ? formatNumber(totalChunks ?? 0)
-                  : "94.2"
+                  : "0"
             }
             unit={statsQuery.data ? "chunks" : "%"}
-            change={1.8}
-            changeLabel="vs last week"
             icon={TrendingUp}
             iconColor="text-emerald-400"
             iconBg="bg-emerald-500/10"
@@ -320,8 +363,6 @@ export default function DashboardPage() {
                   ? formatNumber(failedDocs ?? 0)
                   : activeAlerts
             }
-            change={-25}
-            changeLabel="resolved"
             icon={AlertTriangle}
             iconColor="text-amber-400"
             iconBg="bg-amber-500/10"
@@ -370,9 +411,18 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {revenueData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[220px] text-center">
+                <TrendingUp className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No revenue data yet</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                  Upload and index filings to populate this chart
+                </p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={220}>
               {revenueView === "area" ? (
-                <AreaChart data={mockRevenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+                <AreaChart data={revenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
                   <defs>
                     {Object.entries(TICKER_COLORS).map(([ticker, color]) => (
                       <linearGradient key={ticker} id={`grad-${ticker}`} x1="0" y1="0" x2="0" y2="1">
@@ -400,7 +450,7 @@ export default function DashboardPage() {
                   ))}
                 </AreaChart>
               ) : (
-                <BarChart data={mockRevenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+                <BarChart data={revenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
@@ -412,6 +462,7 @@ export default function DashboardPage() {
                 </BarChart>
               )}
             </ResponsiveContainer>
+            )}
           </motion.div>
 
           {/* Doc type pie (1/3) */}
@@ -424,10 +475,16 @@ export default function DashboardPage() {
             <h3 className="text-sm font-semibold mb-0.5">Document Types</h3>
             <p className="text-xs text-muted-foreground mb-4">Corpus breakdown</p>
 
+            {docTypeData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[150px] text-center">
+                <PieChartIcon className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No documents yet</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={150}>
               <PieChart>
                 <Pie
-                  data={mockDocTypeData}
+                  data={docTypeData}
                   cx="50%"
                   cy="50%"
                   innerRadius={45}
@@ -437,7 +494,7 @@ export default function DashboardPage() {
                   animationBegin={200}
                   animationDuration={800}
                 >
-                  {mockDocTypeData.map((entry, i) => (
+                  {docTypeData.map((entry, i) => (
                     <Cell key={entry.name} fill={entry.color} strokeWidth={0} />
                   ))}
                 </Pie>
@@ -454,7 +511,7 @@ export default function DashboardPage() {
             </ResponsiveContainer>
 
             <div className="space-y-1.5 mt-2">
-              {mockDocTypeData.map((item) => (
+              {docTypeData.map((item) => (
                 <div key={item.name} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: item.color }} />
@@ -464,6 +521,7 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
+            )}
           </motion.div>
         </div>
 
@@ -482,14 +540,16 @@ export default function DashboardPage() {
                 <h3 className="text-sm font-semibold">Query Volume — This Week</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">Successful vs failed queries</p>
               </div>
-              <Badge variant="success" className="text-[10px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5" />
-                98.1% success rate
-              </Badge>
             </div>
 
+            {queryVolumeData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[180px] text-center">
+                <BarChart3 className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                <p className="text-xs text-muted-foreground">No query activity yet</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={mockQueryVolumeData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+              <BarChart data={queryVolumeData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
@@ -498,6 +558,7 @@ export default function DashboardPage() {
                 <Bar dataKey="failed" stackId="a" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </motion.div>
 
           {/* Pipeline status */}
@@ -570,12 +631,13 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="space-y-3">
-              {[
-                { name: "Apple_10K_2023.pdf", ticker: "AAPL", queries: 312, pct: 92 },
-                { name: "MSFT_EarningsQ4_2023.pdf", ticker: "MSFT", queries: 228, pct: 68 },
-                { name: "JPM_AnnualReport_2023.pdf", ticker: "JPM", queries: 187, pct: 55 },
-                { name: "Google_Prospectus_2024.pdf", ticker: "GOOGL", queries: 143, pct: 42 },
-              ].map((doc, i) => (
+              {topDocuments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <FileText className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-xs text-muted-foreground">No documents yet</p>
+                </div>
+              ) : (
+                topDocuments.map((doc, i) => (
                 <motion.div
                   key={doc.name}
                   initial={{ opacity: 0, x: 10 }}
@@ -599,7 +661,8 @@ export default function DashboardPage() {
                     />
                   </div>
                 </motion.div>
-              ))}
+                ))
+              )}
             </div>
 
             {/* Compliance badge */}

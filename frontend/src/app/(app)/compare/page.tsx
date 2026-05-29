@@ -341,13 +341,8 @@ export default function ComparePage() {
   const [activeStepIdx, setActiveStepIdx] = useState(0);
   const stepsForRun = IS_LIVE_API ? PROGRESS_STEPS_LIVE : PROGRESS_STEPS_MOCK;
 
-  // Show the seed mock comparison on first render so the page never feels empty
-  useEffect(() => {
-    if (!comparison) {
-      setComparison(adaptMockComparison(mockComparisonData));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // No preexisting/sample comparison is shown. The results area stays empty
+  // until the user runs a real comparison against their own documents.
 
   const runComparison = async () => {
     if (!docA || !docB) return;
