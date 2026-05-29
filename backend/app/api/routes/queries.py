@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.dependencies import get_current_user, get_db
 from app.db.models import QueryLog, User, Workspace
 from app.db.schemas import PaginatedList, QueryRequest, QueryResponse
@@ -39,9 +40,19 @@ async def run_query(
     Execute a natural language query against the workspace's indexed documents.
 
     Returns a cited answer with source references and confidence score.
-
-    **Status:** Stub — returns HTTP 501 until Week 3 (Pinecone + embeddings) is complete.
+    Requires GROQ_API_KEY to be configured in backend/.env.
     """
+    # Fail fast with a clear 501 if the LLM key is missing, rather than
+    # letting it surface as a cryptic 500 deep inside the pipeline.
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "GROQ_API_KEY is not configured. "
+                "Get a free key at https://console.groq.com and add it to backend/.env"
+            ),
+        )
+
     # Verify workspace ownership
     ws_result = await db.execute(
         select(Workspace).where(
@@ -54,14 +65,6 @@ async def run_query(
 
     try:
         return await run_query_pipeline(body, current_user.id, db)
-    except NotImplementedError:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=(
-                "RAG pipeline is not yet available. "
-                "Complete Week 3 (embeddings + Pinecone) to enable queries."
-            ),
-        )
     except Exception as exc:
         log.exception("Query pipeline error: %s", exc)
         raise HTTPException(

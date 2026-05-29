@@ -49,7 +49,7 @@ async def run_query_pipeline(
 
     # ── 1. Retrieve ───────────────────────────────────────────────────────────
     try:
-        candidates = await retrieve(request, db)
+        candidates = await retrieve(request, db, top_k=request.top_k or settings.RETRIEVER_TOP_K)
     except Exception as exc:
         log.exception("Retrieval failed: %s", exc)
         raise RuntimeError(f"Retrieval failed: {exc}") from exc
@@ -101,10 +101,10 @@ async def run_query_pipeline(
     db.add(query_log)
     await db.commit()
 
-    # ── 5. Comprehensive audit logging (PostgreSQL + DynamoDB) ──────────────────
+    # ── 5. Comprehensive audit logging (PostgreSQL analytics summary) ──────────
     try:
         from app.services.audit import write_comprehensive_audit_log
-        
+
         await write_comprehensive_audit_log(
             query_log_id=query_log.id,
             user_id=user_id,
@@ -120,8 +120,9 @@ async def run_query_pipeline(
             citations=generation["citations"],
             db=db,
         )
+        await db.commit()   # persist AnalyticsSummary row added by audit helper
     except Exception as exc:
-        # Don't fail the request if audit logging fails
+        # Never fail the request over analytics logging
         log.warning("Comprehensive audit logging failed: %s", exc)
 
     log.info(

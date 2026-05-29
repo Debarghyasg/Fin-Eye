@@ -43,23 +43,29 @@ async def _enrich_with_db(
 ) -> list[dict[str, Any]]:
     """Attach full chunk text + parent document name to each pgvector hit.
 
-    Hits whose ``pinecone_id`` no longer matches a Postgres row (deleted
-    between index time and query time) are silently dropped.
+    Joins via ``chunk_embeddings.chunk_id`` → ``chunks`` directly, so the
+    result is correct even when ``chunks.pinecone_id`` was never written back
+    (e.g. a crash between embedding batches).  The ``point_id`` returned by
+    pgvector is used only for the secondary lookup, not as the join key.
     """
-    from app.db.models import Chunk, Document
+    from app.db.models import Chunk, Document, ChunkEmbedding
 
     if not candidates:
         return []
 
     point_ids = [c["point_id"] for c in candidates]
+
+    # Join chunk_embeddings → chunks → documents so we never depend on
+    # chunks.pinecone_id being populated.
     rows = (await db.execute(
-        select(Chunk, Document.original_filename)
+        select(Chunk, Document.original_filename, ChunkEmbedding.point_id)
+        .join(ChunkEmbedding, ChunkEmbedding.chunk_id == Chunk.id)
         .join(Document, Document.id == Chunk.document_id)
-        .where(Chunk.pinecone_id.in_(point_ids))
+        .where(ChunkEmbedding.point_id.in_(point_ids))
     )).all()
 
     # Build a lookup: point_id → (Chunk, filename)
-    by_point_id: dict[str, tuple] = {row[0].pinecone_id: row for row in rows}
+    by_point_id: dict[str, tuple] = {row[2]: row for row in rows}
 
     enriched: list[dict[str, Any]] = []
     for cand in candidates:
