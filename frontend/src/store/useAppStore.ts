@@ -1,4 +1,7 @@
 import { create } from "zustand";
+// NOTE: mock-data is imported for its TYPE shapes only (Document / QueryEntry /
+// Alert are derived via `typeof`). No mock values are seeded into the store —
+// all data is hydrated from the live backend.
 import { mockDocuments, mockQueryHistory, mockAlerts } from "@/lib/mock-data";
 
 export type Document = (typeof mockDocuments)[number];
@@ -71,7 +74,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
 
-  documents: mockDocuments,
+  // Start empty — the workspace is hydrated exclusively from the live
+  // backend (see workspace/page.tsx). No preexisting/sample documents.
+  documents: [],
   addDocument: (doc) => set((s) => ({ documents: [doc, ...s.documents] })),
   removeDocument: (id) =>
     set((s) => ({
@@ -84,12 +89,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       documents: s.documents.map((d) => (d.id === id ? { ...d, ...patch } : d)),
     })),
 
-  queryHistory: mockQueryHistory,
+  // Start empty — query history is hydrated from the backend.
+  queryHistory: [],
   addQuery: (q) => set((s) => ({ queryHistory: [q, ...s.queryHistory] })),
   isQuerying: false,
   setIsQuerying: (v) => set({ isQuerying: v }),
 
-  alerts: mockAlerts,
+  // Start empty — alerts are loaded from the live /alerts endpoint.
+  alerts: [],
   markAlertRead: (id) =>
     set((s) => ({
       alerts: s.alerts.map((a) => (a.id === id ? { ...a, read: true } : a)),
