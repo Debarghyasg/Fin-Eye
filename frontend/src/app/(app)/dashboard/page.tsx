@@ -73,8 +73,6 @@ const TICKER_COLORS: Record<string, string> = {
 
 /* ── Recent activity feed ──────────────────────────────────── */
 function ActivityFeed() {
-  // No fabricated activity. A real feed would be wired to a backend
-  // events endpoint; until then, render an honest empty state.
   const items: Array<{
     icon: React.ElementType;
     color: string;
@@ -121,11 +119,7 @@ function ActivityFeed() {
   );
 }
 
-/* ── RAG pipeline status ─────────────────────────────────────
- * Renders /analytics/pipeline output when live. Falls back to a
- * hard-coded "all green" mock in dev mode (IS_LIVE_API=false) so
- * the dashboard still looks alive when the backend is down.
- */
+/* ── RAG pipeline status ───────────────────────────────────── */
 const MOCK_STAGES: PipelineStageStatus[] = [
   { stage: "PostgreSQL",   status: "ok", latency_ms: 12,   detail: null },
   { stage: "S3 Ingestion", status: "ok", latency_ms: null, detail: "0 pending" },
@@ -219,12 +213,44 @@ function PipelineStatus({
   );
 }
 
+/* ── Helper functions (replaces IIFEs to avoid SWC parse bug) ── */
+const DOC_TYPE_COLORS = ["#22a269", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645", "#3b82f6"];
+
+function buildDocTypeData(documents: ReturnType<typeof useAppStore>["documents"] extends (infer T)[] ? T[] : never[]) {
+  const counts = new Map<string, number>();
+  for (const d of documents) {
+    counts.set((d as any).type, (counts.get((d as any).type) ?? 0) + 1);
+  }
+  const total = documents.length || 1;
+  return Array.from(counts.entries()).map(([name, n], i) => ({
+    name,
+    value: Math.round((n / total) * 100),
+    color: DOC_TYPE_COLORS[i % DOC_TYPE_COLORS.length],
+  }));
+}
+
+function getPipelineSubtitle(
+  pipelineQuery: {
+    isLoading: boolean;
+    isError: boolean;
+    data?: PipelineHealthResponse;
+  }
+): string {
+  if (!IS_LIVE_API) return "All systems operational";
+  if (pipelineQuery.isLoading) return "Checking…";
+  if (pipelineQuery.isError) return "Status unavailable";
+  switch (pipelineQuery.data?.overall) {
+    case "ok":       return "All systems operational";
+    case "degraded": return "Some services degraded";
+    case "down":     return "One or more services down";
+    default:         return "Status unknown";
+  }
+}
+
 /* ── Main Dashboard ────────────────────────────────────────── */
 export default function DashboardPage() {
   const [revenueView, setRevenueView] = useState<"area" | "bar">("area");
 
-  // Live workspace context (Clerk-resolved). When IS_LIVE_API is false,
-  // we never even call the backend — the dashboard renders pure mocks.
   const { getToken } = useAuth();
   const workspaceId = useWorkspaceId();
   const liveEnabled = IS_LIVE_API && Boolean(workspaceId);
@@ -240,15 +266,14 @@ export default function DashboardPage() {
   const pipelineQuery = useQuery<PipelineHealthResponse>({
     queryKey: ["dashboard", "pipeline"],
     queryFn: () => getPipelineHealth(getToken),
-    enabled: IS_LIVE_API,                   // pipeline health doesn't need a workspace
+    enabled: IS_LIVE_API,
     refetchInterval: 30_000,
     staleTime: 15_000,
   });
 
-  // Real values only. When live stats haven't loaded (or no backend), fall
-  // back to the in-memory store — which starts empty — never to sample data.
   const storeDocuments = useAppStore((s) => s.documents);
   const storeAlerts = useAppStore((s) => s.alerts);
+
   const indexedDocs = statsQuery.data
     ? statsQuery.data.indexed
     : storeDocuments.filter((d) => d.status === "indexed").length;
@@ -258,9 +283,6 @@ export default function DashboardPage() {
   const failedDocs = statsQuery.data ? statsQuery.data.failed : null;
   const activeAlerts = storeAlerts.filter((a) => !a.read).length;
 
-  // "Most Queried Documents" — derived from the real workspace documents.
-  // We don't have a per-doc query counter client-side, so show indexed docs
-  // ordered by chunk count as a proxy; empty until the user uploads.
   const _indexedForTop = [...storeDocuments]
     .filter((d) => d.status === "indexed")
     .sort((a, b) => (b.chunkCount ?? 0) - (a.chunkCount ?? 0))
@@ -273,44 +295,16 @@ export default function DashboardPage() {
     pct: Math.round(((d.chunkCount ?? 0) / _maxChunks) * 100),
   }));
 
-  // ── Chart datasets — real-only, no sample portfolio numbers ───────────
-  // Quarterly revenue and weekly query-volume are not derivable client-side
-  // without dedicated backend endpoints, so they start empty and show an
-  // honest empty-state instead of fabricated AAPL/MSFT figures.
   const revenueData: Array<Record<string, number | string>> = [];
   const queryVolumeData: Array<{ day: string; successful: number; failed: number }> = [];
 
-  // Document-type breakdown is genuinely derivable from the workspace docs.
-  const DOC_TYPE_COLORS = ["#22a269", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645", "#3b82f6"];
-  const docTypeData = (() => {
-    const counts = new Map<string, number>();
-    for (const d of storeDocuments) {
-      counts.set(d.type, (counts.get(d.type) ?? 0) + 1);
-    }
-    const total = storeDocuments.length || 1;
-    return Array.from(counts.entries()).map(([name, n], i) => ({
-      name,
-      value: Math.round((n / total) * 100),
-      color: DOC_TYPE_COLORS[i % DOC_TYPE_COLORS.length],
-    }));
-  })();
+  // Named function calls instead of IIFEs — avoids Next.js 15 SWC parser bug
+  const docTypeData = buildDocTypeData(storeDocuments as any);
+  const pipelineSubtitle = getPipelineSubtitle(pipelineQuery);
 
   const stagesForRender: PipelineStageStatus[] = pipelineQuery.data?.stages?.length
     ? pipelineQuery.data.stages
     : MOCK_STAGES;
-
-  // Pipeline header subtitle reflects the overall health when live.
-  const pipelineSubtitle = (() => {
-    if (!IS_LIVE_API) return "All systems operational";
-    if (pipelineQuery.isLoading) return "Checking…";
-    if (pipelineQuery.isError) return "Status unavailable";
-    switch (pipelineQuery.data?.overall) {
-      case "ok":       return "All systems operational";
-      case "degraded": return "Some services degraded";
-      case "down":     return "One or more services down";
-      default:         return "Status unknown";
-    }
-  })();
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -420,48 +414,48 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              {revenueView === "area" ? (
-                <AreaChart data={revenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
-                  <defs>
+              <ResponsiveContainer width="100%" height={220}>
+                {revenueView === "area" ? (
+                  <AreaChart data={revenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+                    <defs>
+                      {Object.entries(TICKER_COLORS).map(([ticker, color]) => (
+                        <linearGradient key={ticker} id={`grad-${ticker}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={color} stopOpacity={0} />
+                        </linearGradient>
+                      ))}
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                     {Object.entries(TICKER_COLORS).map(([ticker, color]) => (
-                      <linearGradient key={ticker} id={`grad-${ticker}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={color} stopOpacity={0} />
-                      </linearGradient>
+                      <Area
+                        key={ticker}
+                        type="monotone"
+                        dataKey={ticker}
+                        stroke={color}
+                        strokeWidth={2}
+                        fill={`url(#grad-${ticker})`}
+                        dot={false}
+                        activeDot={{ r: 4, strokeWidth: 0 }}
+                      />
                     ))}
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                  {Object.entries(TICKER_COLORS).map(([ticker, color]) => (
-                    <Area
-                      key={ticker}
-                      type="monotone"
-                      dataKey={ticker}
-                      stroke={color}
-                      strokeWidth={2}
-                      fill={`url(#grad-${ticker})`}
-                      dot={false}
-                      activeDot={{ r: 4, strokeWidth: 0 }}
-                    />
-                  ))}
-                </AreaChart>
-              ) : (
-                <BarChart data={revenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                  {Object.entries(TICKER_COLORS).map(([ticker, color]) => (
-                    <Bar key={ticker} dataKey={ticker} fill={color} radius={[2, 2, 0, 0]} opacity={0.85} />
-                  ))}
-                </BarChart>
-              )}
-            </ResponsiveContainer>
+                  </AreaChart>
+                ) : (
+                  <BarChart data={revenueData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                    {Object.entries(TICKER_COLORS).map(([ticker, color]) => (
+                      <Bar key={ticker} dataKey={ticker} fill={color} radius={[2, 2, 0, 0]} opacity={0.85} />
+                    ))}
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
             )}
           </motion.div>
 
@@ -481,46 +475,48 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground">No documents yet</p>
               </div>
             ) : (
-            <ResponsiveContainer width="100%" height={150}>
-              <PieChart>
-                <Pie
-                  data={docTypeData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={70}
-                  paddingAngle={3}
-                  dataKey="value"
-                  animationBegin={200}
-                  animationDuration={800}
-                >
-                  {docTypeData.map((entry, i) => (
-                    <Cell key={entry.name} fill={entry.color} strokeWidth={0} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value: number) => [`${value}%`, ""]}
-                  contentStyle={{
-                    background: "hsl(222 47% 7%)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: 8,
-                    fontSize: 11,
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+              <>
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie
+                      data={docTypeData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={70}
+                      paddingAngle={3}
+                      dataKey="value"
+                      animationBegin={200}
+                      animationDuration={800}
+                    >
+                      {docTypeData.map((entry, i) => (
+                        <Cell key={entry.name} fill={entry.color} strokeWidth={0} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number) => [`${value}%`, ""]}
+                      contentStyle={{
+                        background: "hsl(222 47% 7%)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 8,
+                        fontSize: 11,
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
 
-            <div className="space-y-1.5 mt-2">
-              {docTypeData.map((item) => (
-                <div key={item.name} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: item.color }} />
-                    <span className="text-muted-foreground">{item.name}</span>
-                  </div>
-                  <span className="font-medium">{item.value}%</span>
+                <div className="space-y-1.5 mt-2">
+                  {docTypeData.map((item) => (
+                    <div key={item.name} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: item.color }} />
+                        <span className="text-muted-foreground">{item.name}</span>
+                      </div>
+                      <span className="font-medium">{item.value}%</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
             )}
           </motion.div>
         </div>
@@ -548,16 +544,16 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground">No query activity yet</p>
               </div>
             ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={queryVolumeData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                <Tooltip content={<VolumeTooltip />} />
-                <Bar dataKey="successful" stackId="a" fill="#22a269" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="failed" stackId="a" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={queryVolumeData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<VolumeTooltip />} />
+                  <Bar dataKey="successful" stackId="a" fill="#22a269" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="failed" stackId="a" fill="#ef4444" opacity={0.7} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             )}
           </motion.div>
 
@@ -638,29 +634,29 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 topDocuments.map((doc, i) => (
-                <motion.div
-                  key={doc.name}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 + i * 0.07 }}
-                  className="space-y-1.5"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-semibold text-fin-300 flex-shrink-0">{doc.ticker}</span>
-                      <span className="text-muted-foreground truncate">{doc.name}</span>
+                  <motion.div
+                    key={doc.name}
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.6 + i * 0.07 }}
+                    className="space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-semibold text-fin-300 flex-shrink-0">{doc.ticker}</span>
+                        <span className="text-muted-foreground truncate">{doc.name}</span>
+                      </div>
+                      <span className="font-medium flex-shrink-0 ml-2">{doc.queries}</span>
                     </div>
-                    <span className="font-medium flex-shrink-0 ml-2">{doc.queries}</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${doc.pct}%` }}
-                      transition={{ duration: 0.8, delay: 0.65 + i * 0.07 }}
-                      className="h-full rounded-full bg-gradient-to-r from-fin-600 to-fin-400"
-                    />
-                  </div>
-                </motion.div>
+                    <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${doc.pct}%` }}
+                        transition={{ duration: 0.8, delay: 0.65 + i * 0.07 }}
+                        className="h-full rounded-full bg-gradient-to-r from-fin-600 to-fin-400"
+                      />
+                    </div>
+                  </motion.div>
                 ))
               )}
             </div>
