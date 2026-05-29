@@ -1,33 +1,26 @@
 /**
- * Clerk middleware — compatible with @clerk/nextjs v4 (installed: ^4.31.8).
+ * Clerk middleware — @clerk/nextjs v5 + Next.js 15 compatible.
  *
- * clerkMiddleware + createRouteMatcher only exist in Clerk v5+.
- * This project uses @clerk/nextjs ^4.31.8, so we use authMiddleware from
- * "@clerk/nextjs" (NOT from "@clerk/nextjs/server").
+ * v4 used `authMiddleware` which called `headers()` synchronously.
+ * Next.js 15 made `headers()` async-only, so v4 throws:
+ *   "Route used `...headers()` — should be awaited before using its value."
  *
- * The key fix for /sign-in/sso-callback 404:
- *   The catch-all folders [[...sign-in]] and [[...sign-up]] handle every
- *   Clerk sub-route (sso-callback, factor-one, verify-email, etc.).
- *   authMiddleware's publicRoutes must match those same paths so Clerk
- *   can complete the OAuth handshake without being intercepted.
+ * v5 ships `clerkMiddleware` + `createRouteMatcher` which are fully
+ * compatible with Next.js 15's async Request APIs.
  */
-import { authMiddleware } from "@clerk/nextjs";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-export default authMiddleware({
-  // Public routes — accessible without being signed in.
-  // The regex patterns (.*) cover ALL Clerk sub-routes:
-  //   /sign-in/sso-callback     ← Google / GitHub OAuth return
-  //   /sign-in/factor-one       ← MFA step
-  //   /sign-up/verify-email-address ← email verification
-  publicRoutes: [
-    "/",
-    "/sign-in",
-    "/sign-in/(.*)",
-    "/sign-up",
-    "/sign-up/(.*)",
-    "/api/health",
-    "/api/health/(.*)",
-  ],
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/health(.*)",
+]);
+
+export default clerkMiddleware(async (auth, request) => {
+  if (!isPublicRoute(request)) {
+    await auth.protect();
+  }
 });
 
 export const config = {
