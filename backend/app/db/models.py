@@ -3,11 +3,12 @@ SQLAlchemy ORM models.
 
 Tables
 ------
-  users          — one row per Clerk identity
-  workspaces     — a user's isolated document collection
-  documents      — a single uploaded file (PDF / DOCX / TXT)
-  chunks         — extracted text segments from a document
-  query_logs     — immutable audit log of every RAG query (SEC Rule 17a-4)
+  users             — one row per Clerk identity
+  workspaces        — a user's isolated document collection
+  documents         — a single uploaded file (PDF / DOCX / TXT)
+  chunks            — extracted text segments from a document
+  chunk_embeddings  — pgvector dense embeddings (one row per chunk)
+  query_logs        — immutable audit log of every RAG query (SEC Rule 17a-4)
 """
 from __future__ import annotations
 
@@ -610,3 +611,62 @@ class AuditLog(Base):
             f"<AuditLog id={self.id!r} action={self.action!r} "
             f"resource={self.resource_type}/{self.resource_id!r}>"
         )
+
+
+
+# ── chunk_embeddings (pgvector dense embeddings) ──────────────────────────────
+class ChunkEmbedding(Base):
+    """
+    One dense embedding vector per chunk, stored via pgvector.
+
+    Replaces the external Qdrant vector store — all similarity search runs
+    inside PostgreSQL using the ``<=>`` cosine-distance operator.
+
+    The ``point_id`` column carries the deterministic UUID5 derived from
+    ``"{document_id}_{chunk_index}"`` so the retriever can join back to
+    ``chunks.pinecone_id`` without an extra lookup.
+
+    The ``embedding`` column is declared as ``Text`` in the ORM model so
+    SQLAlchemy doesn't need the pgvector Python type installed.  The actual
+    ``VECTOR(384)`` column type is created by migration 0006; ORM reads and
+    writes go through raw SQL in pg_vector_store.py which handles the cast.
+    """
+    __tablename__ = "chunk_embeddings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    chunk_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chunks.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Deterministic UUID5 matching chunks.pinecone_id — the retriever join key.
+    point_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    # The actual column is VECTOR(384) — declared TEXT here so the ORM works
+    # without the pgvector SQLAlchemy extension type installed.
+    # All vector reads/writes go through raw SQL in pg_vector_store.py.
+    embedding: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+    # relationships
+    chunk: Mapped["Chunk"] = relationship("Chunk", foreign_keys=[chunk_id])
+
+    def __repr__(self) -> str:
+        return f"<ChunkEmbedding chunk={self.chunk_id!r} doc={self.document_id!r}>"

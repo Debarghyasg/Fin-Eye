@@ -42,11 +42,15 @@ torch==2.3.1                     # CPU inference only
 transformers==4.45.2             # HuggingFace transformers for FinBERT
 scipy==1.14.1                    # Required for FinBERT preprocessing
 
-# ── FREE: Qdrant vector store (Rust, ACORN filtering, native hybrid)
-# Replaces ChromaDB (PDF §0): single-node prototyping → enterprise-grade.
-# fastembed extra ships the Qdrant/bm25 sparse model so dense + BM25 sparse
-# live in the same query — no separate Redis BM25 layer needed.
-qdrant-client[fastembed]==1.12.0
+# ── Vector search — PostgreSQL pgvector (no extra service) ──────
+# Extends PostgreSQL with a VECTOR column type and the <=> cosine-distance
+# operator.  Migration 0006 runs CREATE EXTENSION IF NOT EXISTS vector
+# automatically on first deploy.
+# Install the extension on your PG instance before running migrations:
+#   Ubuntu/Debian : sudo apt install postgresql-15-pgvector
+#   macOS (brew)  : brew install pgvector
+#   Docker        : use pgvector/pgvector:pg15 image
+# No Python package required — all vector I/O uses raw SQL via asyncpg.
 
 # ── FREE: Groq LLM (Llama 3.1 70B, 14 400 req/day free) ────────
 groq==0.9.0                      # official Groq Python client
@@ -60,10 +64,8 @@ openai==1.52.0                   # OpenAI Python client for GPT-4o
 celery[librabbitmq]==5.4.0
 flower==2.0.1                    # optional Celery monitoring UI on :5555
 
-# Redis removed — the codebase never imports it.
-# The original BM25 cache that used Redis was replaced by
-# Qdrant native sparse vectors (see rag/qdrant_store.py).
-# If you add response-caching in the future, re-add redis[hiredis].
+# Redis is not used in this stack. If you add response-caching in the
+# future, add redis[hiredis] here.
 
 # ── Compliance: Fernet encryption at rest (PDF §10) ──────────────
 # AES-128-CBC + HMAC-SHA256, MIT-licensed, AWS KMS analog in prod.

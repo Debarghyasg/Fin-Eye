@@ -90,12 +90,13 @@ async def _get_document_or_404(
     return doc
 
 
-async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: str) -> None:
+async def _process_document_pipeline(document_id: str, storage_key: str, mime_type: str) -> None:
     """
-    Background task: run extraction → chunking → (Week 3: embedding).
+    Background task: extract → PII scan → chunk → embed → index (all local).
 
-    In local dev this runs in-process via FastAPI BackgroundTasks.
-    In production this is triggered by the SQS consumer Lambda / worker.
+    Reads the uploaded file from local filesystem storage, runs every
+    processing stage in-process, and writes results to PostgreSQL only.
+    No external services (Qdrant, S3, SQS, DynamoDB) are used.
     """
     from app.db.session import AsyncSessionLocal
     from app.services.document.extractor import extract_document
@@ -110,8 +111,8 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             doc.status = DocumentStatus.EXTRACTING
             await db.commit()
 
-            # ── 2. Download from storage ──────────────────────────────────────
-            file_bytes = await asyncio.to_thread(storage.download, s3_key)
+            # ── 2. Read file from local storage ──────────────────────────────
+            file_bytes = await asyncio.to_thread(storage.download, storage_key)
 
             # ── 3. Extract text + tables ──────────────────────────────────────
             extraction = await asyncio.to_thread(
@@ -119,11 +120,10 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             )
             doc.page_count = extraction.page_count
             doc.status = DocumentStatus.EXTRACTED
-
-            # Write extracted JSON back to storage
-            extracted_key = storage.extracted_key(document_id)
-            await asyncio.to_thread(storage.upload_json, extraction.to_dict(), extracted_key)
-            doc.s3_key_extracted = extracted_key
+            # s3_key_extracted is not used in the local-filesystem pipeline;
+            # the extracted content lives only in memory during this pipeline
+            # run and is not persisted to a separate file.
+            doc.s3_key_extracted = None
             await db.commit()
 
             # ── 3.5. Post-extraction PII scan ─────────────────────────────────
@@ -769,8 +769,7 @@ async def delete_document(
         except Exception as exc:
             log.warning("Storage delete failed for key %r: %s", s3_key, exc)
 
-    # ── Delete Qdrant vectors (best-effort) ───────────────────────────────────
-    # Bug 2 fix: label said "Pinecone" but the embedder now calls Qdrant.
+    # ── Delete pgvector embeddings (best-effort) ──────────────────────────────
     if chunk_count > 0:
         try:
             from app.services.document.embedder import delete_document_vectors
@@ -778,9 +777,10 @@ async def delete_document(
                 document_id=document_id,
                 workspace_id=workspace_id,
                 chunk_count=chunk_count,
+                db=db,
             )
         except Exception as exc:
-            log.warning("Qdrant vector delete failed for %s: %s", document_id, exc)
+            log.warning("pgvector embedding delete failed for %s: %s", document_id, exc)
 
     # ── Delete DB row (cascades to chunks) ────────────────────────────────────
     await db.delete(doc)

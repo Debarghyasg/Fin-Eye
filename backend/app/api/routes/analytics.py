@@ -12,7 +12,6 @@ GET  /analytics/pipeline       → per-stage latency of the RAG pipeline
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 
@@ -106,7 +105,7 @@ async def pipeline_health(
         detail=None,
     ))
 
-    # ── Embedding model (local/free) ─────────────────────────────────────────
+    # ── Embedding model (local, CPU) ─────────────────────────────────────────
     stages.append(PipelineStageStatus(
         stage="Embeddings",
         status="ok",
@@ -114,12 +113,13 @@ async def pipeline_health(
         detail=f"model={settings.EMBEDDING_MODEL}",
     ))
 
-    # ── Qdrant vector store (PR 2) ────────────────────────────────────────────
+    # ── pgvector (PostgreSQL) ─────────────────────────────────────────────────
+    # Vector search runs inside the same PostgreSQL instance — no extra service.
     stages.append(PipelineStageStatus(
-        stage="Qdrant",
-        status="ok",
+        stage="pgvector",
+        status="ok" if db_status == "ok" else "degraded",
         latency_ms=None,
-        detail=f"url={settings.QDRANT_URL} collection={settings.QDRANT_COLLECTION}",
+        detail="PostgreSQL pgvector extension (cosine similarity)",
     ))
 
     # ── Groq LLM (free tier) ─────────────────────────────────────────────────
@@ -128,14 +128,6 @@ async def pipeline_health(
         status="ok" if settings.GROQ_API_KEY else "not_configured",
         latency_ms=None,
         detail=f"model={settings.GROQ_MODEL}" if settings.GROQ_API_KEY else "Configure GROQ_API_KEY",
-    ))
-
-    # ── DynamoDB audit (optional) ─────────────────────────────────────────────
-    stages.append(PipelineStageStatus(
-        stage="DynamoDB Audit",
-        status="ok" if settings.USE_DYNAMODB else "disabled",
-        latency_ms=None,
-        detail=f"table={settings.DYNAMODB_AUDIT_TABLE}" if settings.USE_DYNAMODB else "Optional audit logging",
     ))
 
     # Bug 4 fix: was `stages[:1]` which only checked Postgres.
@@ -357,45 +349,12 @@ async def get_token_usage_analytics(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access denied to workspaces: {list(unauthorized)}"
         )
-    
-    if not settings.USE_DYNAMODB:
-        return {
-            "error": "Token usage analytics requires DynamoDB audit logging",
-            "note": "Set USE_DYNAMODB=true in configuration to enable detailed token tracking"
-        }
-    
-    try:
-        from app.services.aws.dynamodb import get_workspace_query_stats
-        
-        total_tokens = 0
-        total_queries = 0
-        workspace_stats = {}
-        
-        for workspace_id in workspace_ids:
-            stats = await asyncio.to_thread(get_workspace_query_stats, workspace_id, days)
-            workspace_stats[workspace_id] = stats
-            
-            if "total_tokens" in stats:
-                total_tokens += stats["total_tokens"]
-            if "total_queries" in stats:
-                total_queries += stats["total_queries"]
-        
-        # Rough cost estimation (update with actual pricing)
-        estimated_cost_usd = total_tokens * 0.00002  # Approximate GPT-4 pricing per token
-        
-        return {
-            "period_days": days,
-            "workspace_count": len(workspace_ids),
-            "total_queries": total_queries,
-            "total_tokens": total_tokens,
-            "estimated_cost_usd": round(estimated_cost_usd, 4),
-            "workspace_breakdown": workspace_stats,
-            "note": "Cost estimates are approximate and for planning purposes only"
-        }
-        
-    except Exception as exc:
-        log.error("Token usage analytics failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Token usage analysis failed: {exc}"
-        )
+
+    return {
+        "error": "Token usage analytics are not available in the local stack.",
+        "note": (
+            "Detailed per-token tracking requires an external LLM API with "
+            "usage reporting (e.g. OpenAI). Groq's free tier does not expose "
+            "per-request token counts in the response payload."
+        ),
+    }
