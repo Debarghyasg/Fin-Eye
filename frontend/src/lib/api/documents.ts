@@ -107,6 +107,9 @@ export interface DocumentUpdate {
   fiscal_period?: string | null;
 }
 
+/** Alias kept for backwards compat with updateDocumentMetadata() call sites. */
+export type DocumentMetadataUpdate = DocumentUpdate;
+
 export async function listDocuments(
   workspaceId: string,
   opts: { page?: number; page_size?: number } = {},
