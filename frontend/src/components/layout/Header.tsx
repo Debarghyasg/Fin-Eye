@@ -15,10 +15,13 @@ import {
 import { IS_LIVE_API, getApiHealth, type ApiHealthResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
+import { useTranslation } from "@/lib/i18n";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 
 export function Header({ title, subtitle }: { title: string; subtitle?: string }) {
   const alerts = useAppStore((s) => s.alerts);
   const unread = alerts.filter((a) => !a.read).length;
+  const { t } = useTranslation();
 
   return (
     <>
@@ -26,10 +29,12 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
         <div className="w-full bg-amber-500/15 border-b border-amber-500/30 px-6 py-2 flex items-center gap-2 text-xs text-amber-300">
           <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
           <span>
-            <strong>Mock mode — not connected to the database.</strong>{" "}
-            Create <code className="font-mono bg-amber-500/10 px-1 rounded">frontend/.env.local</code> with{" "}
+            <strong>{t("header.mockMode")}</strong>{" "}
+            {t("header.mockModeCreate")}{" "}
+            <code className="font-mono bg-amber-500/10 px-1 rounded">frontend/.env.local</code>{" "}
+            {t("header.mockModeWith")}{" "}
             <code className="font-mono bg-amber-500/10 px-1 rounded">NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1</code>{" "}
-            and restart the frontend.
+            {t("header.mockModeRestart")}
           </span>
         </div>
       )}
@@ -41,6 +46,8 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
         </motion.div>
 
         <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+
           <ApiHealthDot />
 
           <Button variant="ghost" size="icon-sm" className="relative">
@@ -56,7 +63,7 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
 
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-fin-500/10 border border-fin-500/20">
             <Shield className="w-3 h-3 text-fin-400" />
-            <span className="text-xs text-fin-300 font-medium">SEC Compliant</span>
+            <span className="text-xs text-fin-300 font-medium">{t("header.secCompliant")}</span>
           </div>
 
           <button className="flex items-center gap-2 pl-3 border-l border-white/[0.07]">
@@ -74,6 +81,7 @@ export function Header({ title, subtitle }: { title: string; subtitle?: string }
 
 function ApiHealthDot() {
   const { getToken } = useAuth();
+  const { t } = useTranslation();
 
   const healthQuery = useQuery<ApiHealthResponse>({
     queryKey: ["api-health"],
@@ -85,11 +93,11 @@ function ApiHealthDot() {
   });
 
   const visual = (() => {
-    if (!IS_LIVE_API) return { dot: "bg-slate-500", ping: false, label: "Mock mode" };
-    if (healthQuery.isLoading) return { dot: "bg-slate-400", ping: false, label: "Checking…" };
-    if (healthQuery.isError || !healthQuery.data) return { dot: "bg-red-500", ping: true, label: "API unreachable" };
-    if (healthQuery.data.status === "ok") return { dot: "bg-emerald-400", ping: true, label: "API healthy" };
-    if (healthQuery.data.status === "degraded") return { dot: "bg-amber-400", ping: true, label: "API degraded" };
+    if (!IS_LIVE_API) return { dot: "bg-slate-500", ping: false, label: t("health.mockMode") };
+    if (healthQuery.isLoading) return { dot: "bg-slate-400", ping: false, label: t("health.checking") };
+    if (healthQuery.isError || !healthQuery.data) return { dot: "bg-red-500", ping: true, label: t("health.unreachable") };
+    if (healthQuery.data.status === "ok") return { dot: "bg-emerald-400", ping: true, label: t("health.healthy") };
+    if (healthQuery.data.status === "degraded") return { dot: "bg-amber-400", ping: true, label: t("health.degraded") };
     return { dot: "bg-red-500", ping: true, label: `API ${healthQuery.data.status}` };
   })();
 
@@ -115,13 +123,13 @@ function ApiHealthDot() {
           <p className="font-medium">{visual.label}</p>
           {healthQuery.data && (
             <>
-              <p className="text-muted-foreground mt-0.5">DB: <span className="font-mono">{healthQuery.data.database}</span></p>
+              <p className="text-muted-foreground mt-0.5">{t("health.dbLabel")}: <span className="font-mono">{healthQuery.data.database}</span></p>
               <p className="text-muted-foreground">v{healthQuery.data.version} · {healthQuery.data.environment}</p>
             </>
           )}
           {!IS_LIVE_API && (
             <p className="text-muted-foreground mt-0.5">
-              Set <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> to enable.
+              {t("health.enablePrefix")} <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> {t("health.enableSuffix")}
             </p>
           )}
         </TooltipContent>

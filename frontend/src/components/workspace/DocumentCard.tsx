@@ -32,13 +32,14 @@ import { ApiError, IS_LIVE_API, deleteDocument } from "@/lib/api";
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import type { Document } from "@/store/useAppStore";
 import { useAppStore } from "@/store/useAppStore";
+import { useTranslation } from "@/lib/i18n";
 import { DocumentChunksDialog } from "./DocumentChunksDialog";
 import { DocumentEditDialog } from "./DocumentEditDialog";
 
 const statusConfig = {
-  indexed: { label: "Indexed", icon: CheckCircle2, color: "text-emerald-400" },
-  processing: { label: "Processing", icon: Loader2, color: "text-violet-400" },
-  failed: { label: "Failed", icon: Clock, color: "text-red-400" },
+  indexed: { labelKey: "doc.statusIndexed", icon: CheckCircle2, color: "text-emerald-400" },
+  processing: { labelKey: "doc.statusProcessing", icon: Loader2, color: "text-violet-400" },
+  failed: { labelKey: "doc.statusFailed", icon: Clock, color: "text-red-400" },
 };
 
 export interface DocumentCardProps {
@@ -49,6 +50,7 @@ export interface DocumentCardProps {
 }
 
 export function DocumentCard({ doc, onClick, active = false, selectable = false }: DocumentCardProps) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [chunksOpen, setChunksOpen] = useState(false);
@@ -148,7 +150,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                     <span className="text-white/20">·</span>
                     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                       <Database className="w-2.5 h-2.5" />
-                      {doc.chunkCount} chunks
+                      {t("doc.chunks", { count: doc.chunkCount })}
                     </span>
                   </>
                 )}
@@ -198,7 +200,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                 >
                   <MenuItem
                     icon={ExternalLink}
-                    label="View PDF"
+                    label={t("doc.menuViewPdf")}
                     onClick={() => {
                       setMenuOpen(false);
                       setActiveSource({ docId: doc.id, page: 1, excerpt: "" });
@@ -206,7 +208,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                   />
                   <MenuItem
                     icon={Pencil}
-                    label="Edit metadata"
+                    label={t("doc.menuEdit")}
                     onClick={() => {
                       setMenuOpen(false);
                       setEditOpen(true);
@@ -214,7 +216,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                   />
                   <MenuItem
                     icon={Database}
-                    label="View chunks"
+                    label={t("doc.menuViewChunks")}
                     onClick={() => {
                       setMenuOpen(false);
                       setChunksOpen(true);
@@ -223,7 +225,7 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
                   <div className="my-1 border-t border-white/[0.05]" />
                   <MenuItem
                     icon={Trash2}
-                    label="Delete"
+                    label={t("doc.menuDelete")}
                     danger
                     onClick={() => {
                       setMenuOpen(false);
@@ -243,10 +245,10 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
               <span className="text-muted-foreground inline-flex items-center gap-1.5">
                 <Loader2 className="w-3 h-3 animate-spin text-violet-400" />
                 {processingPct < 30
-                  ? "Extracting text…"
+                  ? t("doc.extractingText")
                   : processingPct < 70
-                    ? "Chunking & embedding…"
-                    : "Indexing vectors…"}
+                    ? t("doc.chunkingEmbedding")
+                    : t("doc.indexingVectors")}
               </span>
               <span className="font-mono text-violet-300">{processingPct}%</span>
             </div>
@@ -266,10 +268,10 @@ export function DocumentCard({ doc, onClick, active = false, selectable = false 
             <StatusIcon
               className={cn("w-3 h-3", cfg.color, isProcessing && "animate-spin")}
             />
-            <span className={cn("text-xs", cfg.color)}>{cfg.label}</span>
+            <span className={cn("text-xs", cfg.color)}>{t(cfg.labelKey)}</span>
             {doc.status === "indexed" && (
               <span className="text-xs text-muted-foreground">
-                · {(doc.confidence * 100).toFixed(0)}% conf.
+                · {t("doc.confidenceShort", { pct: (doc.confidence * 100).toFixed(0) })}
               </span>
             )}
           </div>
@@ -363,6 +365,7 @@ function DeleteConfirmDialog({
   error,
   onConfirm,
 }: DeleteConfirmDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="sm">
@@ -370,18 +373,16 @@ function DeleteConfirmDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="w-3.5 h-3.5 text-red-400" />
-            Delete document?
+            {t("doc.deleteTitle")}
           </DialogTitle>
         </DialogHeader>
 
         {/* Body — scrolls if content is tall */}
         <DialogBody>
           <DialogDescription className="mb-3">
-            This permanently removes{" "}
+            {t("doc.deleteConfirmPrefix")}{" "}
             <span className="text-foreground font-medium">{document.name}</span>{" "}
-            and all of its extracted chunks from the workspace. The vector
-            index entries and stored file are deleted too. This cannot be
-            undone.
+            {t("doc.deleteConfirmSuffix")}
           </DialogDescription>
 
           {error && (
@@ -402,7 +403,7 @@ function DeleteConfirmDialog({
             onClick={() => onOpenChange(false)}
             disabled={isPending}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -412,7 +413,7 @@ function DeleteConfirmDialog({
             disabled={isPending}
           >
             {isPending && <Loader2 className="w-3 h-3 animate-spin" />}
-            {isPending ? "Deleting…" : "Delete document"}
+            {isPending ? t("doc.deleting") : t("doc.deleteAction")}
           </Button>
         </DialogFooter>
       </DialogContent>

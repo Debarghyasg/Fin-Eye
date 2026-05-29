@@ -42,33 +42,34 @@ import {
   type TickerSubscription,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 
 const CHANNELS = [
   {
     key: "subscribe_anomaly" as const,
-    label: "Anomaly Detection",
-    desc: "Z-score deviations on financial metrics",
+    labelKey: "subscribe.anomalyTitle",
+    descKey: "subscribe.anomalyDesc",
     icon: Activity,
     color: "text-amber-400 bg-amber-500/10",
   },
   {
     key: "subscribe_sentiment" as const,
-    label: "Sentiment Shifts",
-    desc: "Management tone changes (FinBERT)",
+    labelKey: "subscribe.sentimentTitle",
+    descKey: "subscribe.sentimentDesc",
     icon: TrendingDown,
     color: "text-blue-400 bg-blue-500/10",
   },
   {
     key: "subscribe_filing" as const,
-    label: "New Filings",
-    desc: "Auto-poll EDGAR for 10-K / 10-Q / 8-K",
+    labelKey: "subscribe.filingTitle",
+    descKey: "subscribe.filingDesc",
     icon: FileText,
     color: "text-fin-400 bg-fin-500/10",
   },
   {
     key: "subscribe_regulatory" as const,
-    label: "Regulatory Changes",
-    desc: "Risk-factor language additions",
+    labelKey: "subscribe.regulatoryTitle",
+    descKey: "subscribe.regulatoryDesc",
     icon: Shield,
     color: "text-violet-400 bg-violet-500/10",
   },
@@ -136,6 +137,7 @@ export function SubscribeTickerDialog({
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [success, setSuccess] = useState<TickerSubscription | null>(null);
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
 
   // Reset form whenever the dialog reopens
   useEffect(() => {
@@ -160,11 +162,11 @@ export function SubscribeTickerDialog({
   });
 
   const tickerError = (() => {
-    const t = form.ticker.trim();
-    if (t.length === 0) return null; // handled by submit-disabled
-    if (t.length > 10) return "Ticker must be at most 10 characters.";
-    if (!/^[A-Z0-9.]{1,10}$/.test(t.toUpperCase()))
-      return "Ticker can only contain letters, digits, and dots.";
+    const t2 = form.ticker.trim();
+    if (t2.length === 0) return null; // handled by submit-disabled
+    if (t2.length > 10) return t("subscribe.errLength");
+    if (!/^[A-Z0-9.]{1,10}$/.test(t2.toUpperCase()))
+      return t("subscribe.errChars");
     return null;
   })();
 
@@ -215,13 +217,11 @@ export function SubscribeTickerDialog({
             <span className="w-7 h-7 rounded-lg bg-fin-500/10 flex items-center justify-center">
               <Bell className="w-3.5 h-3.5 text-fin-400" />
             </span>
-            Subscribe to a Ticker
+            {t("subscribe.title")}
           </DialogTitle>
           <DialogDescription>
-            Fin-Sight will monitor SEC EDGAR for new filings and run anomaly
-            detection on every new document indexed for this company.
-          </DialogDescription>
-        </DialogHeader>
+            {t("subscribe.description")}
+          </DialogDescription>        </DialogHeader>
 
         <AnimatePresence mode="wait">
           {success ? (
@@ -241,13 +241,13 @@ export function SubscribeTickerDialog({
                 <CheckCircle2 className="w-6 h-6 text-fin-400" />
               </motion.div>
               <p className="text-sm font-semibold mb-1">
-                Now monitoring{" "}
+                {t("subscribe.nowMonitoring")}{" "}
                 <span className="text-fin-300">{success.ticker}</span>
               </p>
               <p className="text-xs text-muted-foreground max-w-sm">
                 {IS_LIVE_API
-                  ? "We'll check EDGAR every hour for new filings, run anomaly detection on each one, and email you on material findings."
-                  : "Subscription added to the local demo. Connect a backend to enable live EDGAR polling and email alerts."}
+                  ? t("subscribe.monitoringLive")
+                  : t("subscribe.monitoringMock")}
               </p>
             </motion.div>
           ) : (
@@ -263,7 +263,7 @@ export function SubscribeTickerDialog({
               <div className="grid grid-cols-[1fr_2fr] gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                    Ticker
+                    {t("subscribe.ticker")}
                   </label>
                   <Input
                     autoFocus
@@ -286,7 +286,7 @@ export function SubscribeTickerDialog({
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                    Company name (optional)
+                    {t("subscribe.companyOptional")}
                   </label>
                   <Input
                     value={form.companyName}
@@ -299,7 +299,7 @@ export function SubscribeTickerDialog({
               {/* Channels */}
               <div className="space-y-2">
                 <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                  Alert channels
+                  {t("subscribe.alertChannels")}
                 </p>
                 <div className="space-y-1.5">
                   {CHANNELS.map((ch) => {
@@ -324,8 +324,8 @@ export function SubscribeTickerDialog({
                           <Icon className="w-4 h-4" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-foreground">{ch.label}</p>
-                          <p className="text-[10px] text-muted-foreground">{ch.desc}</p>
+                          <p className="text-xs font-semibold text-foreground">{t(ch.labelKey)}</p>
+                          <p className="text-[10px] text-muted-foreground">{t(ch.descKey)}</p>
                         </div>
                         <Switch
                           checked={enabled}
@@ -342,9 +342,9 @@ export function SubscribeTickerDialog({
                 <div className="flex items-center gap-2">
                   <Bell className="w-3.5 h-3.5 text-muted-foreground" />
                   <div>
-                    <p className="text-xs font-medium">Email me on new alerts</p>
+                    <p className="text-xs font-medium">{t("subscribe.emailTitle")}</p>
                     <p className="text-[10px] text-muted-foreground">
-                      Sent via AWS SES when an alert fires
+                      {t("subscribe.emailDesc")}
                     </p>
                   </div>
                 </div>
@@ -360,7 +360,7 @@ export function SubscribeTickerDialog({
                   <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-red-300">
                     {(liveMutation.error as ApiError | Error)?.message ??
-                      "Failed to create subscription."}
+                      t("subscribe.errorCreate")}
                   </p>
                 </div>
               )}
@@ -370,9 +370,7 @@ export function SubscribeTickerDialog({
                 <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/15">
                   <AlertTriangle className="w-3 h-3 text-amber-400 flex-shrink-0 mt-0.5" />
                   <p className="text-[10px] text-amber-300">
-                    Demo mode — subscription will be added to the local list
-                    only. Set NEXT_PUBLIC_API_URL to wire EDGAR polling and
-                    SES email delivery.
+                    {t("subscribe.demoHint")}
                   </p>
                 </div>
               )}
@@ -384,18 +382,18 @@ export function SubscribeTickerDialog({
                   onClick={() => onOpenChange(false)}
                   disabled={liveMutation.isPending}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button type="submit" variant="glow" disabled={submitDisabled} className="gap-1.5">
                   {liveMutation.isPending ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Subscribing…
+                      {t("subscribe.subscribing")}
                     </>
                   ) : (
                     <>
                       <Plus className="w-3.5 h-3.5" />
-                      Subscribe
+                      {t("subscribe.subscribe")}
                     </>
                   )}
                 </Button>

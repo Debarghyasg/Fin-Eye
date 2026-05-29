@@ -25,44 +25,46 @@ import {
   type WorkspaceOut,
 } from "@/lib/api";
 import { cn, formatNumber } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Static config sections — preserved from the original mock dashboard.
  * These switches don't persist anywhere yet; they're a placeholder UI for
  * security/AI/notification toggles that the backend will own later.
+ * Labels/descriptions are translation keys resolved at render time.
  * ────────────────────────────────────────────────────────────────────────── */
 const sections = [
   {
-    title: "Security & Compliance",
+    titleKey: "settings.secCompliance",
     icon: Shield,
     color: "text-fin-400 bg-fin-500/10",
     items: [
-      { label: "PII Auto-Detection", desc: "Scan uploads with AWS Comprehend before storage", enabled: true },
-      { label: "KMS Encryption at Rest", desc: "AES-256 via AWS KMS for all document storage", enabled: true },
-      { label: "Immutable Audit Logs", desc: "7-year DynamoDB trail — SEC Rule 17a-4 compliant", enabled: true },
-      { label: "MFA Required", desc: "Enforce MFA for all workspace members", enabled: false },
+      { labelKey: "settings.piiTitle", descKey: "settings.piiDesc", enabled: true },
+      { labelKey: "settings.kmsTitle", descKey: "settings.kmsDesc", enabled: true },
+      { labelKey: "settings.immutableTitle", descKey: "settings.immutableDesc", enabled: true },
+      { labelKey: "settings.mfaTitle", descKey: "settings.mfaDesc", enabled: false },
     ],
   },
   {
-    title: "AI & RAG Pipeline",
+    titleKey: "settings.aiPipeline",
     icon: Database,
     color: "text-blue-400 bg-blue-500/10",
     items: [
-      { label: "Hybrid Search (BM25 + Vector)", desc: "Combines keyword and semantic retrieval", enabled: true },
-      { label: "Cross-Encoder Re-ranking", desc: "Re-score retrieval results before generation", enabled: true },
-      { label: "Adaptive Chunking", desc: "Separate strategies for tables vs prose", enabled: true },
-      { label: "Multilingual Support", desc: "Auto-translate non-English documents", enabled: false },
+      { labelKey: "settings.hybridTitle", descKey: "settings.hybridDesc", enabled: true },
+      { labelKey: "settings.crossEncoderTitle", descKey: "settings.crossEncoderDesc", enabled: true },
+      { labelKey: "settings.adaptiveTitle", descKey: "settings.adaptiveDesc", enabled: true },
+      { labelKey: "settings.multilingualTitle", descKey: "settings.multilingualDesc", enabled: false },
     ],
   },
   {
-    title: "Notifications",
+    titleKey: "settings.notifications",
     icon: Bell,
     color: "text-amber-400 bg-amber-500/10",
     items: [
-      { label: "Anomaly Alerts", desc: "Notify when metrics deviate from historical norms", enabled: true },
-      { label: "New Filing Processed", desc: "Alert when a document finishes indexing", enabled: true },
-      { label: "Sentiment Shifts", desc: "Detect tone changes in management commentary", enabled: false },
-      { label: "Weekly Summary Digest", desc: "Email digest every Monday 8 AM EST", enabled: true },
+      { labelKey: "settings.anomalyTitle", descKey: "settings.anomalyDesc", enabled: true },
+      { labelKey: "settings.newFilingTitle", descKey: "settings.newFilingDesc", enabled: true },
+      { labelKey: "settings.sentimentTitle", descKey: "settings.sentimentDesc", enabled: false },
+      { labelKey: "settings.weeklyTitle", descKey: "settings.weeklyDesc", enabled: true },
     ],
   },
 ];
@@ -72,6 +74,7 @@ const sections = [
  * ────────────────────────────────────────────────────────────────────────── */
 function ProfileCard() {
   const { getToken, isSignedIn } = useAuth();
+  const { t } = useTranslation();
   const liveEnabled = IS_LIVE_API && Boolean(isSignedIn);
 
   const meQuery = useQuery<UserOut>({
@@ -107,13 +110,13 @@ function ProfileCard() {
       ),
     onSuccess: (next) => {
       queryClient.setQueryData(["me"], next);
-      setFeedback({ kind: "ok", text: "Profile updated." });
+      setFeedback({ kind: "ok", text: t("settings.profileUpdated") });
     },
     onError: (err: unknown) => {
       const text =
         err instanceof ApiError
-          ? `Update failed: ${err.message}`
-          : "Update failed.";
+          ? `${t("settings.updateFailedPrefix")} ${err.message}`
+          : t("settings.updateFailed");
       setFeedback({ kind: "err", text });
     },
   });
@@ -133,7 +136,7 @@ function ProfileCard() {
         <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400">
           <UserIcon className="w-4 h-4" />
         </div>
-        <h3 className="text-sm font-semibold">Profile</h3>
+        <h3 className="text-sm font-semibold">{t("settings.profile")}</h3>
         {liveEnabled && meQuery.isFetching && (
           <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
         )}
@@ -141,8 +144,7 @@ function ProfileCard() {
 
       {!liveEnabled && (
         <p className="text-xs text-muted-foreground">
-          Sign in and set <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> to manage
-          your profile against a real backend.
+          {t("settings.profileSignInPrefix")} <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> {t("settings.profileSignInSuffix")}
         </p>
       )}
 
@@ -166,7 +168,7 @@ function ProfileCard() {
             saveMutation.mutate();
           }}
         >
-          <FieldRow label="Display name">
+          <FieldRow label={t("settings.displayName")}>
             <Input
               value={fullName}
               maxLength={255}
@@ -176,7 +178,7 @@ function ProfileCard() {
             />
           </FieldRow>
 
-          <FieldRow label="Email">
+          <FieldRow label={t("settings.email")}>
             <Input
               type="email"
               value={email}
@@ -186,13 +188,13 @@ function ProfileCard() {
             />
           </FieldRow>
 
-          <FieldRow label="Clerk user ID" muted>
+          <FieldRow label={t("settings.clerkUserId")} muted>
             <code className="text-[11px] text-muted-foreground font-mono break-all">
               {meQuery.data.clerk_user_id}
             </code>
           </FieldRow>
 
-          <FieldRow label="Account created" muted>
+          <FieldRow label={t("settings.accountCreated")} muted>
             <span className="text-xs text-muted-foreground">
               {new Date(meQuery.data.created_at).toLocaleString()}
             </span>
@@ -206,7 +208,7 @@ function ProfileCard() {
               disabled={!isDirty || saveMutation.isPending}
               className="text-xs"
             >
-              {saveMutation.isPending ? "Saving…" : "Save changes"}
+              {saveMutation.isPending ? t("settings.saving") : t("settings.saveChanges")}
             </Button>
           </div>
         </form>
@@ -216,12 +218,13 @@ function ProfileCard() {
 }
 
 function ProfileError({ detail }: { detail?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
       <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
       <div>
-        <p className="font-medium text-red-300">Could not load profile</p>
-        <p className="text-muted-foreground">{detail ?? "Backend unavailable."}</p>
+        <p className="font-medium text-red-300">{t("settings.couldNotLoadProfile")}</p>
+        <p className="text-muted-foreground">{detail ?? t("common.backendUnavailable")}</p>
       </div>
     </div>
   );
@@ -272,6 +275,7 @@ function FeedbackLine({ feedback }: { feedback: { kind: "ok" | "err"; text: stri
  * ────────────────────────────────────────────────────────────────────────── */
 function WorkspacesCard() {
   const { getToken, isSignedIn } = useAuth();
+  const { t } = useTranslation();
   const liveEnabled = IS_LIVE_API && Boolean(isSignedIn);
   const queryClient = useQueryClient();
 
@@ -308,7 +312,7 @@ function WorkspacesCard() {
       if (err instanceof ApiError) {
         setCreateError(err.message);
       } else {
-        setCreateError((err as Error)?.message ?? "Failed to create workspace.");
+        setCreateError((err as Error)?.message ?? t("settings.failedCreateWorkspace"));
       }
     },
   });
@@ -325,18 +329,18 @@ function WorkspacesCard() {
         <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-fin-500/10 text-fin-400">
           <Briefcase className="w-4 h-4" />
         </div>
-        <h3 className="text-sm font-semibold">Workspaces</h3>
+        <h3 className="text-sm font-semibold">{t("settings.workspaces")}</h3>
         {liveEnabled && wsQuery.isFetching && (
           <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
         )}
         <Badge variant="outline" className="ml-auto text-[10px] py-0 px-1.5">
-          {liveEnabled && wsQuery.data ? wsQuery.data.length : "—"} total
+          {liveEnabled && wsQuery.data ? wsQuery.data.length : "—"} {t("settings.totalSuffix")}
         </Badge>
       </div>
 
       {!liveEnabled && (
         <p className="text-xs text-muted-foreground mb-4">
-          Connect a backend to manage workspaces.
+          {t("settings.connectBackendWorkspaces")}
         </p>
       )}
 
@@ -350,9 +354,9 @@ function WorkspacesCard() {
         <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs mb-3">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-red-300">Could not load workspaces</p>
+            <p className="font-medium text-red-300">{t("settings.couldNotLoadWorkspaces")}</p>
             <p className="text-muted-foreground">
-              {(wsQuery.error as Error)?.message ?? "Backend unavailable."}
+              {(wsQuery.error as Error)?.message ?? t("common.backendUnavailable")}
             </p>
           </div>
         </div>
@@ -362,7 +366,7 @@ function WorkspacesCard() {
         <div className="space-y-2 mb-4">
           {wsQuery.data.length === 0 && (
             <p className="text-xs text-muted-foreground py-3 text-center border border-dashed border-white/10 rounded-lg">
-              You don't have any workspaces yet.
+              {t("settings.noWorkspaces")}
             </p>
           )}
           {wsQuery.data.map((ws, i) => (
@@ -378,7 +382,7 @@ function WorkspacesCard() {
                   <span className="text-sm font-medium truncate">{ws.name}</span>
                   {ws.is_default && (
                     <Badge variant="success" className="text-[9px] py-0 px-1.5">
-                      default
+                      {t("settings.default")}
                     </Badge>
                   )}
                 </div>
@@ -388,8 +392,7 @@ function WorkspacesCard() {
                   </p>
                 )}
                 <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                  {formatNumber(ws.document_count)} document
-                  {ws.document_count === 1 ? "" : "s"} · created{" "}
+                  {formatNumber(ws.document_count)} {t("settings.documentsWord")} · {t("settings.createdWord")}{" "}
                   {new Date(ws.created_at).toLocaleDateString()}
                 </p>
               </div>
@@ -410,19 +413,19 @@ function WorkspacesCard() {
           className="space-y-2 pt-3 border-t border-white/[0.05]"
         >
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
-            New workspace
+            {t("settings.newWorkspace")}
           </p>
           <Input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="Workspace name"
+            placeholder={t("settings.workspaceNamePlaceholder")}
             maxLength={255}
             className="h-9 text-xs"
           />
           <Input
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
-            placeholder="Description (optional)"
+            placeholder={t("settings.descriptionPlaceholder")}
             maxLength={1024}
             className="h-9 text-xs"
           />
@@ -433,7 +436,7 @@ function WorkspacesCard() {
               </span>
             ) : (
               <span className="text-[11px] text-muted-foreground/70">
-                Names must be unique per user.
+                {t("settings.namesUnique")}
               </span>
             )}
             <Button
@@ -443,7 +446,7 @@ function WorkspacesCard() {
               className="text-xs gap-1.5"
             >
               <Plus className="w-3 h-3" />
-              {createMutation.isPending ? "Creating…" : "Create"}
+              {createMutation.isPending ? t("settings.creating") : t("settings.create")}
             </Button>
           </div>
         </form>
@@ -456,9 +459,10 @@ function WorkspacesCard() {
  * Page entry-point.
  * ────────────────────────────────────────────────────────────────────────── */
 export default function SettingsPage() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      <Header title="Settings" subtitle="Workspace configuration and security" />
+      <Header title={t("settings.title")} subtitle={t("settings.subtitle")} />
       <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-3xl">
 
         <ProfileCard />
@@ -468,7 +472,7 @@ export default function SettingsPage() {
           const Icon = section.icon;
           return (
             <motion.div
-              key={section.title}
+              key={section.titleKey}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: si * 0.1 }}
@@ -478,20 +482,20 @@ export default function SettingsPage() {
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${section.color}`}>
                   <Icon className="w-4 h-4" />
                 </div>
-                <h3 className="text-sm font-semibold">{section.title}</h3>
+                <h3 className="text-sm font-semibold">{t(section.titleKey)}</h3>
               </div>
               <div className="space-y-0">
                 {section.items.map((item, ii) => (
                   <motion.div
-                    key={item.label}
+                    key={item.labelKey}
                     initial={{ opacity: 0, x: -8 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: si * 0.1 + ii * 0.06 }}
                     className="flex items-center justify-between py-3 border-b border-white/[0.05] last:border-0"
                   >
                     <div>
-                      <p className="text-sm font-medium">{item.label}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
+                      <p className="text-sm font-medium">{t(item.labelKey)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t(item.descKey)}</p>
                     </div>
                     <Switch defaultChecked={item.enabled} />
                   </motion.div>
@@ -512,7 +516,7 @@ export default function SettingsPage() {
             <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/10 text-violet-400">
               <Key className="w-4 h-4" />
             </div>
-            <h3 className="text-sm font-semibold">API Keys</h3>
+            <h3 className="text-sm font-semibold">{t("settings.apiKeys")}</h3>
           </div>
           {[
             { name: "Production Key", key: "fsk_prod_••••••••••••••••3f2a", created: "Jan 12, 2024", scopes: ["read", "query"] },
@@ -533,15 +537,15 @@ export default function SettingsPage() {
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground font-mono mt-0.5">{apiKey.key}</p>
-                <p className="text-[10px] text-muted-foreground">Created {apiKey.created}</p>
+                <p className="text-[10px] text-muted-foreground">{t("settings.createdLabel")} {apiKey.created}</p>
               </div>
               <Button variant="ghost" size="sm" className="text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10">
-                Revoke
+                {t("settings.revoke")}
               </Button>
             </motion.div>
           ))}
           <Button variant="outline" size="sm" className="mt-3 gap-2 text-xs">
-            <Key className="w-3.5 h-3.5" /> Generate New Key
+            <Key className="w-3.5 h-3.5" /> {t("settings.generateNewKey")}
           </Button>
         </motion.div>
       </div>

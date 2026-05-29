@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { useAppStore } from "@/store/useAppStore";
 import { IS_LIVE_API } from "@/lib/api/client";
 import { useWorkspaceId } from "@/lib/use-workspace";
+import { useTranslation } from "@/lib/i18n";
 import {
   uploadDocument,
   getDocumentStatus,
@@ -46,6 +47,7 @@ export function UploadZone() {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const addDocument = useAppStore((s) => s.addDocument);
   const updateDocument = useAppStore((s) => s.updateDocument);
+  const { t } = useTranslation();
 
   // Clerk hooks. When IS_LIVE_API is false we never call getToken, so
   // the offline-friendly mock mode keeps working without sign-in.
@@ -286,15 +288,14 @@ export function UploadZone() {
     <div className="space-y-4">
       {IS_LIVE_API && !isSignedIn && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          You&apos;re not signed in — uploads will use the offline mock. Sign
-          in to upload to the real backend.
+          {t("upload.notSignedIn")}
         </div>
       )}
 
       {IS_LIVE_API && isSignedIn && !workspaceId && (
         <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300 flex items-center gap-2">
           <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
-          Resolving workspace… wait a moment before uploading.
+          {t("upload.resolvingWorkspace")}
         </div>
       )}
 
@@ -335,17 +336,17 @@ export function UploadZone() {
         </motion.div>
 
         {isDragActive ? (
-          <p className="text-fin-300 font-medium">Drop files to upload…</p>
+          <p className="text-fin-300 font-medium">{t("upload.dropToUpload")}</p>
         ) : (
           <>
             <p className="font-medium text-foreground mb-1">
-              Drag & drop financial documents
+              {t("upload.dragDrop")}
             </p>
             <p className="text-sm text-muted-foreground mb-3">
-              10-Ks, earnings call transcripts, prospectuses, annual reports
+              {t("upload.dragDropDesc")}
             </p>
             <span className="inline-flex items-center px-3 py-1 rounded-full bg-fin-500/10 border border-fin-500/20 text-xs text-fin-300">
-              PDF · DOCX · TXT up to 50 MB · S3 + KMS encrypted at rest
+              {t("upload.fileTypes")}
             </span>
           </>
         )}
@@ -375,7 +376,7 @@ export function UploadZone() {
                   <div className="space-y-1">
                     <Progress value={f.progress} className="h-1" />
                     <p className="text-xs text-muted-foreground">
-                      Uploading… {Math.round(f.progress)}%
+                      {t("upload.uploading", { pct: Math.round(f.progress) })}
                     </p>
                   </div>
                 )}
@@ -383,7 +384,7 @@ export function UploadZone() {
                   <div className="flex items-center gap-1.5">
                     <Loader2 className="w-3 h-3 text-fin-400 animate-spin" />
                     <p className="text-xs text-fin-300">
-                      Extracting & indexing on the backend…
+                      {t("upload.extractingIndexing")}
                     </p>
                   </div>
                 )}
@@ -391,7 +392,7 @@ export function UploadZone() {
                   <div className="flex items-center gap-1.5">
                     <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                     <p className="text-xs text-emerald-400">
-                      Indexed successfully · PII scan passed
+                      {t("upload.indexedSuccess")}
                     </p>
                   </div>
                 )}
@@ -399,7 +400,7 @@ export function UploadZone() {
                   <div className="flex items-center gap-1.5">
                     <AlertCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
                     <p className="text-xs text-red-400 truncate" title={f.errorMessage}>
-                      {f.errorMessage ?? "Upload failed — check browser console"}
+                      {f.errorMessage ?? t("upload.failed")}
                     </p>
                   </div>
                 )}

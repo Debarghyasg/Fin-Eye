@@ -45,6 +45,7 @@ import {
   type WorkspaceAnalytics,
 } from "@/lib/api";
 import { useAuth } from "@clerk/nextjs";
+import { useTranslation } from "@/lib/i18n";
 // No preexisting/sample analytics. These series start empty; charts render
 // honest empty-states until the backend provides real per-day aggregates.
 const mockConfidenceTrend: Array<{ date: string; avg_confidence: number; p25: number; p75: number }> = [];
@@ -84,6 +85,7 @@ export default function AnalyticsPage() {
   // never hit the backend with the literal string "default".
   const workspaceId = useWorkspaceId();
   const { getToken, isSignedIn } = useAuth();
+  const { t } = useTranslation();
   const liveEnabled = IS_LIVE_API && !!workspaceId;
 
   // Live audit aggregates — only fired when an API URL is configured
@@ -161,8 +163,8 @@ export default function AnalyticsPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Header
-        title="Analytics"
-        subtitle="30-day workspace activity · query volume, confidence, token usage"
+        title={t("analytics.title")}
+        subtitle={t("analytics.subtitle")}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -189,25 +191,21 @@ export default function AnalyticsPage() {
             {IS_LIVE_API ? (
               liveError ? (
                 <span className="text-red-300">
-                  Backend reachable but the audit endpoint returned an error:{" "}
+                  {t("analytics.bannerErrorPrefix")}{" "}
                   <span className="font-mono">{(liveError as Error).message}</span>
                 </span>
               ) : liveLoading ? (
                 <span className="text-emerald-300">
-                  Live · loading aggregates from /analytics/audit/workspace/{workspaceId ?? "…"}…
+                  {t("analytics.bannerLoading", { id: workspaceId ?? "…" })}
                 </span>
               ) : (
                 <span className="text-emerald-300">
-                  Live · aggregate stats from /analytics/audit/workspace/{workspaceId ?? "?"} (period: {live?.period_days ?? 30}d).
-                  Per-day time series appear once the analytics endpoint
-                  buckets by day.
+                  {t("analytics.bannerLive", { id: workspaceId ?? "?", days: live?.period_days ?? 30 })}
                 </span>
               )
             ) : (
               <span className="text-amber-300">
-                Demo mode — set NEXT_PUBLIC_API_URL to wire the top-row stat cards
-                and model-distribution donut to live data from
-                /api/v1/analytics/audit/workspace/&lt;id&gt;.
+                {t("analytics.bannerDemo")}
               </span>
             )}
           </div>
@@ -225,41 +223,41 @@ export default function AnalyticsPage() {
           ) : (
             <>
               <StatCard
-                title="Total Queries"
+                title={t("analytics.totalQueries")}
                 value={formatNumber(aggregates.totalQueries)}
                 change={18.4}
-                changeLabel="vs prior 30d"
+                changeLabel={t("analytics.vsPrior30d")}
                 icon={Zap}
                 iconColor="text-blue-400"
                 iconBg="bg-blue-500/10"
                 index={0}
               />
               <StatCard
-                title="Avg Confidence"
+                title={t("analytics.avgConfidence")}
                 value={(aggregates.avgConfidence * 100).toFixed(1)}
                 unit="%"
                 change={2.1}
-                changeLabel="vs prior 30d"
+                changeLabel={t("analytics.vsPrior30d")}
                 icon={TrendingUp}
                 iconColor="text-emerald-400"
                 iconBg="bg-emerald-500/10"
                 index={1}
               />
               <StatCard
-                title="Tokens Consumed"
+                title={t("analytics.tokensConsumed")}
                 value={formatNumber(aggregates.totalTokens)}
                 change={-4.7}
-                changeLabel="vs prior 30d"
+                changeLabel={t("analytics.vsPrior30d")}
                 icon={Coins}
                 iconColor="text-fin-400"
                 iconBg="bg-fin-500/10"
                 index={2}
               />
               <StatCard
-                title="Estimated Cost"
+                title={t("analytics.estimatedCost")}
                 value={`$${estimatedCostUsd}`}
                 change={-4.7}
-                changeLabel="GPT-4o blended"
+                changeLabel={t("analytics.gpt4oBlended")}
                 icon={Activity}
                 iconColor="text-violet-400"
                 iconBg="bg-violet-500/10"
@@ -280,16 +278,16 @@ export default function AnalyticsPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Query Volume</h3>
+                <h3 className="text-sm font-semibold">{t("analytics.queryVolume")}</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Last 30 days · successful vs failed
+                  {t("analytics.last30Successful")}
                 </p>
               </div>
             </div>
             {mockQueryVolumeTrend.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[240px] text-center">
                 <Zap className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No query activity yet</p>
+                <p className="text-xs text-muted-foreground">{t("analytics.noQueryActivity")}</p>
               </div>
             ) : (
             <ResponsiveContainer width="100%" height={240}>
@@ -314,16 +312,16 @@ export default function AnalyticsPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Confidence Trend</h3>
+                <h3 className="text-sm font-semibold">{t("analytics.confidenceTrend")}</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Daily mean with p25/p75 band
+                  {t("analytics.dailyMeanBand")}
                 </p>
               </div>
             </div>
             {mockConfidenceTrend.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[240px] text-center">
                 <TrendingUp className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No confidence data yet</p>
+                <p className="text-xs text-muted-foreground">{t("analytics.noConfidenceData")}</p>
               </div>
             ) : (
             <ResponsiveContainer width="100%" height={240}>
@@ -381,19 +379,19 @@ export default function AnalyticsPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Token Usage Per Day</h3>
+                <h3 className="text-sm font-semibold">{t("analytics.tokenUsagePerDay")}</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Prompt + completion tokens · 30 days
+                  {t("analytics.promptCompletion")}
                 </p>
               </div>
               <span className="text-[11px] text-muted-foreground">
-                Total: {formatNumber(mockTokenUsage.reduce((s, d) => s + d.total, 0))}
+                {t("analytics.total", { count: formatNumber(mockTokenUsage.reduce((s, d) => s + d.total, 0)) })}
               </span>
             </div>
             {mockTokenUsage.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[240px] text-center">
                 <Coins className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No token usage yet</p>
+                <p className="text-xs text-muted-foreground">{t("analytics.noTokenUsage")}</p>
               </div>
             ) : (
             <ResponsiveContainer width="100%" height={240}>
@@ -432,12 +430,12 @@ export default function AnalyticsPage() {
             transition={{ delay: 0.35 }}
             className="gradient-card p-5"
           >
-            <h3 className="text-sm font-semibold mb-0.5">Query Types</h3>
-            <p className="text-xs text-muted-foreground mb-4">Topic distribution</p>
+            <h3 className="text-sm font-semibold mb-0.5">{t("analytics.queryTypes")}</h3>
+            <p className="text-xs text-muted-foreground mb-4">{t("analytics.topicDistribution")}</p>
             {mockQueryTypes.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[170px] text-center">
                 <BarChart3 className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No query data yet</p>
+                <p className="text-xs text-muted-foreground">{t("analytics.noQueryData")}</p>
               </div>
             ) : (
             <>
@@ -499,9 +497,9 @@ export default function AnalyticsPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Most Queried Documents</h3>
+                <h3 className="text-sm font-semibold">{t("analytics.mostQueried")}</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Last 30 days · cross-doc query usage
+                  {t("analytics.crossDocUsage")}
                 </p>
               </div>
               <FileText className="w-3.5 h-3.5 text-muted-foreground" />
@@ -511,7 +509,7 @@ export default function AnalyticsPage() {
               {mockMostQueriedDocs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
                   <FileText className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                  <p className="text-xs text-muted-foreground">No query data yet</p>
+                  <p className="text-xs text-muted-foreground">{t("analytics.noQueryData")}</p>
                 </div>
               ) : (
                 mockMostQueriedDocs.map((doc, i) => {
@@ -533,7 +531,7 @@ export default function AnalyticsPage() {
                         <span className="text-muted-foreground truncate">{doc.name}</span>
                       </div>
                       <span className="font-mono text-foreground flex-shrink-0 ml-2">
-                        {doc.queries} queries
+                        {t("analytics.queriesSuffix", { count: doc.queries })}
                       </span>
                     </div>
                     <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
@@ -558,16 +556,16 @@ export default function AnalyticsPage() {
             transition={{ delay: 0.45 }}
             className="gradient-card p-5"
           >
-            <h3 className="text-sm font-semibold mb-0.5">Model Mix</h3>
+            <h3 className="text-sm font-semibold mb-0.5">{t("analytics.modelMix")}</h3>
             <p className="text-xs text-muted-foreground mb-4">
               {aggregates.modelDistribution
-                ? "Live distribution from query_logs"
-                : "No data yet"}
+                ? t("analytics.liveDistribution")
+                : t("analytics.noDataYet")}
             </p>
             {modelMixData.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[170px] text-center">
                 <Activity className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No model usage yet</p>
+                <p className="text-xs text-muted-foreground">{t("analytics.noModelUsage")}</p>
               </div>
             ) : (
             <>
@@ -648,6 +646,7 @@ function TokenUsageCard({
   query: UseQueryResult<TokenUsageResponse, Error>;
 }) {
   const { data, isLoading, isError, error } = query;
+  const { t } = useTranslation();
 
   return (
     <motion.section
@@ -660,22 +659,24 @@ function TokenUsageCard({
         <div>
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Coins className="w-3.5 h-3.5 text-fin-400" />
-            Token Usage &amp; Cost
+            {t("analytics.tokenUsageCost")}
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            POST /analytics/audit/token-usage · last 30 days
+            {t("analytics.tokenUsageEndpoint")}
           </p>
         </div>
         {data && (
           <Badge variant="outline" className="text-[10px]">
-            {data.workspace_count} workspace{data.workspace_count === 1 ? "" : "s"}
+            {data.workspace_count === 1
+              ? t("analytics.workspaceCountOne", { count: data.workspace_count })
+              : t("analytics.workspaceCountOther", { count: data.workspace_count })}
           </Badge>
         )}
       </div>
 
       {!IS_LIVE_API && (
         <p className="text-xs text-muted-foreground py-6 text-center">
-          Connect a backend to view live token consumption.
+          {t("analytics.connectBackendTokens")}
         </p>
       )}
 
@@ -691,9 +692,9 @@ function TokenUsageCard({
         <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-red-300">Token usage unavailable</p>
+            <p className="font-medium text-red-300">{t("analytics.tokenUnavailable")}</p>
             <p className="text-muted-foreground">
-              {(error as Error)?.message ?? "Backend returned an error."}
+              {(error as Error)?.message ?? t("analytics.backendError")}
             </p>
           </div>
         </div>
@@ -713,19 +714,19 @@ function TokenUsageCard({
         <>
           <div className="grid grid-cols-3 gap-3">
             <Stat
-              label="Queries"
+              label={t("analytics.statQueries")}
               value={formatNumber(data.total_queries)}
               hint={`${data.period_days}d`}
             />
             <Stat
-              label="Tokens"
+              label={t("analytics.statTokens")}
               value={formatNumber(data.total_tokens)}
-              hint="prompt + completion"
+              hint={t("analytics.statTokensHint")}
             />
             <Stat
-              label="Est. cost"
+              label={t("analytics.statCost")}
               value={`$${data.estimated_cost_usd.toFixed(4)}`}
-              hint="GPT-4 blended"
+              hint={t("analytics.statCostHint")}
             />
           </div>
           {data.note && (
@@ -749,6 +750,7 @@ function UserAuditTrailCard({
   liveEnabled: boolean;
 }) {
   const { data, isLoading, isError, error } = query;
+  const { t } = useTranslation();
   // Combine postgres + dynamodb log slices into one chronological list
   // for display. Both shapes are loose dicts so we render only the keys
   // we know about and ignore the rest.
@@ -769,22 +771,22 @@ const entries = data
         <div>
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Shield className="w-3.5 h-3.5 text-fin-400" />
-            My Activity Trail
+            {t("analytics.myActivityTrail")}
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            GET /analytics/audit/user/&#123;user_id&#125; · SEC 17a-4
+            {t("analytics.activityEndpoint")}
           </p>
         </div>
         {data && (
           <Badge variant="outline" className="text-[10px]">
-            {formatNumber(data.audit_trail.total_entries)} entries
+            {t("analytics.entriesCount", { count: formatNumber(data.audit_trail.total_entries) })}
           </Badge>
         )}
       </div>
 
       {!liveEnabled && (
         <p className="text-xs text-muted-foreground py-6 text-center">
-          Sign in and connect a backend to load your activity trail.
+          {t("analytics.signInActivity")}
         </p>
       )}
 
@@ -800,9 +802,9 @@ const entries = data
         <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-red-300">Could not load audit trail</p>
+            <p className="font-medium text-red-300">{t("analytics.couldNotLoadTrail")}</p>
             <p className="text-muted-foreground">
-              {((meQuery.error ?? error) as Error | undefined)?.message ?? "Backend unavailable."}
+              {((meQuery.error ?? error) as Error | undefined)?.message ?? t("common.backendUnavailable")}
             </p>
           </div>
         </div>
@@ -811,7 +813,7 @@ const entries = data
       {liveEnabled && data && entries.length === 0 && (
         <div className="rounded-lg border border-dashed border-white/10 py-6 text-center text-xs text-muted-foreground">
           <Database className="w-4 h-4 mx-auto mb-2 opacity-50" />
-          No audit entries yet.
+          {t("analytics.noAuditEntries")}
           <p className="mt-1 text-muted-foreground/70">
             DynamoDB audit logging surfaces queries here when{" "}
             <code className="text-fin-300">USE_DYNAMODB=true</code>.
@@ -859,6 +861,7 @@ function Stat({
 }
 
 function AuditEntryRow({ entry }: { entry: { [key: string]: unknown } }) {
+  const { t } = useTranslation();
   const queryText = typeof entry.query_text === "string" ? entry.query_text : null;
   const model = typeof entry.model_used === "string" ? entry.model_used : null;
   const latency = typeof entry.latency_ms === "number" ? entry.latency_ms : null;
@@ -875,7 +878,7 @@ function AuditEntryRow({ entry }: { entry: { [key: string]: unknown } }) {
   return (
     <li className="rounded-lg border border-white/[0.05] bg-white/[0.02] p-3">
       <p className="text-xs text-foreground line-clamp-2">
-        {queryText ?? "(no query text recorded)"}
+        {queryText ?? t("analytics.noQueryText")}
       </p>
       <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[10px] text-muted-foreground">
         {model && (
@@ -889,7 +892,7 @@ function AuditEntryRow({ entry }: { entry: { [key: string]: unknown } }) {
           </span>
         )}
         {confidence != null && (
-          <span>conf. {(confidence * 100).toFixed(0)}%</span>
+          <span>{t("analytics.confShort", { pct: (confidence * 100).toFixed(0) })}</span>
         )}
         {ts && <span className="ml-auto">{new Date(ts).toLocaleString()}</span>}
       </div>

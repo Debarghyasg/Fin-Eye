@@ -45,6 +45,7 @@ import { mockComparisonData } from "@/lib/mock-data";
 import { cn, sleep } from "@/lib/utils";
 import { useAppStore, type Document } from "@/store/useAppStore";
 import { useWorkspaceId } from "@/lib/use-workspace";
+import { useTranslation } from "@/lib/i18n";
 
 /* ── Selector dropdown — now backed by the document store ──────────────── */
 interface DocSelectorProps {
@@ -56,6 +57,7 @@ interface DocSelectorProps {
 }
 
 function DocSelector({ label, selected, options, onChange, excludeId }: DocSelectorProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const filtered = options.filter((o) => o.id !== excludeId);
 
@@ -79,7 +81,7 @@ function DocSelector({ label, selected, options, onChange, excludeId }: DocSelec
               </p>
             </>
           ) : (
-            <p className="text-sm text-muted-foreground italic">Select a document…</p>
+            <p className="text-sm text-muted-foreground italic">{t("compare.selectDocument")}</p>
           )}
         </div>
         <ChevronDown
@@ -101,7 +103,7 @@ function DocSelector({ label, selected, options, onChange, excludeId }: DocSelec
           >
             {filtered.length === 0 ? (
               <p className="px-4 py-6 text-xs text-muted-foreground text-center">
-                No other indexed documents available
+                {t("compare.noOtherDocs")}
               </p>
             ) : (
               filtered.map((opt) => (
@@ -137,6 +139,7 @@ function DocSelector({ label, selected, options, onChange, excludeId }: DocSelec
 
 /* ── Metric row ────────────────────────────────────────────────────────── */
 function MetricRow({ metric, index }: { metric: NormalisedMetric; index: number }) {
+  const { t } = useTranslation();
   const isFlat = metric.direction === "flat";
   const isUp = metric.direction === "up";
   const DeltaIcon = isFlat ? Minus : isUp ? TrendingUp : TrendingDown;
@@ -154,7 +157,7 @@ function MetricRow({ metric, index }: { metric: NormalisedMetric; index: number 
     >
       <div className="text-right">
         <p className="font-semibold text-foreground text-sm">{metric.valueA}</p>
-        <p className="text-[10px] text-muted-foreground">Period A</p>
+        <p className="text-[10px] text-muted-foreground">{t("compare.periodA")}</p>
       </div>
 
       <div className="flex flex-col items-center gap-1 min-w-[140px]">
@@ -173,7 +176,7 @@ function MetricRow({ metric, index }: { metric: NormalisedMetric; index: number 
 
       <div className="text-left">
         <p className="font-semibold text-foreground text-sm">{metric.valueB}</p>
-        <p className="text-[10px] text-muted-foreground">Period B</p>
+        <p className="text-[10px] text-muted-foreground">{t("compare.periodB")}</p>
       </div>
 
       <div className="w-24 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
@@ -202,29 +205,30 @@ const riskConfig = {
     icon: PlusCircle,
     color: "text-emerald-400",
     bg: "bg-emerald-500/10 border-emerald-500/20",
-    label: "New",
+    labelKey: "risk.new",
   },
   expanded: {
     icon: Edit3,
     color: "text-amber-400",
     bg: "bg-amber-500/10 border-amber-500/20",
-    label: "Expanded",
+    labelKey: "risk.expanded",
   },
   removed: {
     icon: MinusCircle,
     color: "text-red-400",
     bg: "bg-red-500/10 border-red-500/20",
-    label: "Removed",
+    labelKey: "risk.removed",
   },
   modified: {
     icon: AlertTriangle,
     color: "text-blue-400",
     bg: "bg-blue-500/10 border-blue-500/20",
-    label: "Modified",
+    labelKey: "risk.modified",
   },
 } as const;
 
 function RiskChangeRow({ change, index }: { change: NormalisedRiskChange; index: number }) {
+  const { t } = useTranslation();
   const cfg = riskConfig[change.type];
   const Icon = cfg.icon;
   return (
@@ -237,7 +241,7 @@ function RiskChangeRow({ change, index }: { change: NormalisedRiskChange; index:
       <Icon className={cn("w-4 h-4 flex-shrink-0 mt-0.5", cfg.color)} />
       <div className="min-w-0">
         <span className={cn("text-[10px] font-bold uppercase tracking-wide", cfg.color)}>
-          {cfg.label}
+          {t(cfg.labelKey)}
         </span>
         <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">{change.text}</p>
       </div>
@@ -295,24 +299,25 @@ function SentimentGauge({
 
 /* ── Run progress steps ───────────────────────────────────────────────── */
 const PROGRESS_STEPS_LIVE = [
-  "Submitting comparison request…",
-  "Extracting financial metrics with GPT-4o…",
-  "Diffing metrics + risk-factor sets…",
-  "Running FinBERT sentiment analysis…",
-  "Generating AI narrative summary…",
-  "Wrapping up…",
+  "compare.stepLive1",
+  "compare.stepLive2",
+  "compare.stepLive3",
+  "compare.stepLive4",
+  "compare.stepLive5",
+  "compare.stepLive6",
 ];
 
 const PROGRESS_STEPS_MOCK = [
-  "Extracting financial tables from both documents…",
-  "Running semantic similarity on risk factor sections…",
-  "Computing metric deltas and YoY changes…",
-  "Analyzing management tone with sentiment model…",
-  "Generating comparison report…",
+  "compare.stepMock1",
+  "compare.stepMock2",
+  "compare.stepMock3",
+  "compare.stepMock4",
+  "compare.stepMock5",
 ];
 
 /* ── Main page ─────────────────────────────────────────────────────────── */
 export default function ComparePage() {
+  const { t } = useTranslation();
   const documents = useAppStore((s) => s.documents);
   const workspaceId = useWorkspaceId();
   const { getToken } = useAuth();
@@ -347,7 +352,7 @@ export default function ComparePage() {
   const runComparison = async () => {
     if (!docA || !docB) return;
     if (docA.id === docB.id) {
-      setRunError("Pick two different documents to compare.");
+      setRunError(t("compare.pickTwoDifferent"));
       return;
     }
 
@@ -389,7 +394,7 @@ export default function ComparePage() {
       });
 
       if (final.status === "failed") {
-        setRunError(final.error_message ?? "Comparison failed.");
+        setRunError(final.error_message ?? t("compare.comparisonFailed"));
         setComparison(adaptLiveComparison(final));
       } else {
         setComparison(adaptLiveComparison(final));
@@ -447,7 +452,7 @@ export default function ComparePage() {
           : await getComparison(item.id, getToken);
 
       if (result.status === "failed") {
-        setRunError(result.error_message ?? "Comparison failed.");
+        setRunError(result.error_message ?? t("compare.comparisonFailed"));
       }
       setComparison(adaptLiveComparison(result));
     } catch (err) {
@@ -464,8 +469,8 @@ export default function ComparePage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Header
-        title="Document Comparison"
-        subtitle="AI-powered side-by-side financial document analysis"
+        title={t("compare.title")}
+        subtitle={t("compare.subtitle")}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -477,7 +482,7 @@ export default function ComparePage() {
         >
           <div className="flex items-end gap-4">
             <DocSelector
-              label="Document A (Baseline)"
+              label={t("compare.documentABaseline")}
               selected={docA}
               options={indexedDocs}
               onChange={setDocA}
@@ -494,7 +499,7 @@ export default function ComparePage() {
             </div>
 
             <DocSelector
-              label="Document B (Compare)"
+              label={t("compare.documentBCompare")}
               selected={docB}
               options={indexedDocs}
               onChange={setDocB}
@@ -510,12 +515,12 @@ export default function ComparePage() {
               {isRunning ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Analyzing…
+                  {t("compare.analyzing")}
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  Run Comparison
+                  {t("compare.runComparison")}
                 </>
               )}
             </Button>
@@ -530,8 +535,7 @@ export default function ComparePage() {
             <div className="flex items-center gap-2 mt-3 text-[10px] text-muted-foreground">
               <Info className="w-3 h-3" />
               <span>
-                Demo mode — using mock comparison data. Set NEXT_PUBLIC_API_URL
-                to point at a backend to run real GPT-4o + FinBERT comparisons.
+                {t("compare.demoHint")}
               </span>
             </div>
           )}
@@ -597,7 +601,7 @@ export default function ComparePage() {
                         ) : (
                           <span className="w-3 h-3 rounded-full border border-white/10" />
                         )}
-                        {step}
+                        {t(step)}
                       </motion.div>
                     );
                   })}
@@ -627,16 +631,16 @@ export default function ComparePage() {
               <Tabs defaultValue="metrics">
                 <TabsList className="mb-4">
                   <TabsTrigger value="metrics">
-                    Financial Metrics ({comparison.metrics.length})
+                    {t("compare.financialMetrics", { count: comparison.metrics.length })}
                   </TabsTrigger>
                   <TabsTrigger value="risk">
-                    Risk Factor Changes ({comparison.riskChanges.length})
+                    {t("compare.riskFactorChanges", { count: comparison.riskChanges.length })}
                   </TabsTrigger>
                   <TabsTrigger value="sentiment" disabled={!comparison.sentiment}>
-                    Sentiment Analysis
+                    {t("compare.sentimentAnalysis")}
                   </TabsTrigger>
                   <TabsTrigger value="narrative" disabled={!comparison.narrative}>
-                    AI Narrative
+                    {t("compare.aiNarrative")}
                   </TabsTrigger>
                 </TabsList>
 
@@ -652,33 +656,33 @@ export default function ComparePage() {
                       <div className="flex gap-2 ml-auto">
                         <Badge variant="success">
                           {comparison.metrics.filter((m) => m.direction === "up").length}{" "}
-                          Improved
+                          {t("compare.improved")}
                         </Badge>
                         <Badge variant="destructive">
                           {comparison.metrics.filter((m) => m.direction === "down").length}{" "}
-                          Declined
+                          {t("compare.declined")}
                         </Badge>
                       </div>
                     </div>
 
                     {comparison.metrics.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-12">
-                        No financial metrics extracted from these documents.
+                        {t("compare.noMetrics")}
                       </p>
                     ) : (
                       <>
                         <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-4 mb-2 px-2">
                           <p className="text-right text-[10px] text-muted-foreground uppercase tracking-wide">
-                            {comparison.documentA.period ?? "Period A"}
+                            {comparison.documentA.period ?? t("compare.periodA")}
                           </p>
                           <p className="text-center text-[10px] text-muted-foreground uppercase tracking-wide w-[140px]">
-                            Metric · Δ
+                            {t("compare.metricDelta")}
                           </p>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                            {comparison.documentB.period ?? "Period B"}
+                            {comparison.documentB.period ?? t("compare.periodB")}
                           </p>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wide w-24">
-                            Magnitude
+                            {t("compare.magnitude")}
                           </p>
                         </div>
 
@@ -695,11 +699,13 @@ export default function ComparePage() {
                   <div className="gradient-card p-6 space-y-3">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h3 className="font-semibold text-sm">Risk Factor Language Changes</h3>
+                        <h3 className="font-semibold text-sm">{t("compare.riskLanguageChanges")}</h3>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {comparison.riskChanges.length === 0
-                            ? "No material risk-factor changes detected"
-                            : `Detected ${comparison.riskChanges.length} material change${comparison.riskChanges.length === 1 ? "" : "s"} between filings`}
+                            ? t("compare.noRiskChanges")
+                            : comparison.riskChanges.length === 1
+                              ? t("compare.detectedChangesOne", { count: comparison.riskChanges.length })
+                              : t("compare.detectedChangesOther", { count: comparison.riskChanges.length })}
                         </p>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
@@ -714,7 +720,7 @@ export default function ComparePage() {
                               variant="outline"
                               className={cn("text-[10px]", cfg.color)}
                             >
-                              {cfg.label}: {count}
+                              {t(cfg.labelKey)}: {count}
                             </Badge>
                           );
                         })}
@@ -722,7 +728,7 @@ export default function ComparePage() {
                     </div>
                     {comparison.riskChanges.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-8">
-                        Both filings appear to share the same set of risk factors.
+                        {t("compare.sameRiskFactors")}
                       </p>
                     ) : (
                       comparison.riskChanges.map((change, i) => (
@@ -738,18 +744,17 @@ export default function ComparePage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="gradient-card p-6 space-y-5">
                         <div>
-                          <h3 className="font-semibold text-sm mb-1">Management Tone Score</h3>
+                          <h3 className="font-semibold text-sm mb-1">{t("compare.managementToneScore")}</h3>
                           <p className="text-xs text-muted-foreground">
-                            FinBERT positive-sentiment probability over the management
-                            commentary section.
+                            {t("compare.managementToneDesc")}
                           </p>
                         </div>
                         <SentimentGauge
-                          label={`${comparison.documentA.period ?? "Period A"} Baseline`}
+                          label={t("compare.baseline", { period: comparison.documentA.period ?? t("compare.periodA") })}
                           score={comparison.sentiment.scoreA}
                         />
                         <SentimentGauge
-                          label={`${comparison.documentB.period ?? "Period B"} Current`}
+                          label={t("compare.current", { period: comparison.documentB.period ?? t("compare.periodB") })}
                           score={comparison.sentiment.scoreB}
                           prev={comparison.sentiment.scoreA}
                         />
@@ -762,7 +767,7 @@ export default function ComparePage() {
                           )}
                         >
                           <p className="font-semibold text-xs uppercase tracking-wide mb-1">
-                            AI Interpretation
+                            {t("compare.aiInterpretation")}
                             {comparison.sentiment.significance && (
                               <span className="ml-2 opacity-80">
                                 · {comparison.sentiment.significance}
@@ -771,19 +776,19 @@ export default function ComparePage() {
                           </p>
                           {comparison.sentiment.interpretation ??
                             (comparison.sentiment.delta < 0
-                              ? "Management tone shifted toward increased caution between periods."
-                              : "Management tone reflects increased confidence between periods.")}
+                              ? t("compare.toneCaution")
+                              : t("compare.toneConfidence"))}
                         </div>
                       </div>
 
                       <div className="gradient-card p-6 space-y-4">
-                        <h3 className="font-semibold text-sm">Linguistic Breakdown</h3>
+                        <h3 className="font-semibold text-sm">{t("compare.linguisticBreakdown")}</h3>
                         {[
-                          { label: "Confidence Language", a: 72, b: 58 },
-                          { label: "Hedging Phrases", a: 28, b: 45 },
-                          { label: "Forward Guidance", a: 64, b: 61 },
-                          { label: "Risk Acknowledgement", a: 41, b: 53 },
-                          { label: "Positive Outlook", a: 69, b: 55 },
+                          { label: t("compare.confidenceLanguage"), a: 72, b: 58 },
+                          { label: t("compare.hedgingPhrases"), a: 28, b: 45 },
+                          { label: t("compare.forwardGuidance"), a: 64, b: 61 },
+                          { label: t("compare.riskAcknowledgement"), a: 41, b: 53 },
+                          { label: t("compare.positiveOutlook"), a: 69, b: 55 },
                         ].map((row, i) => (
                           <motion.div
                             key={row.label}
@@ -826,7 +831,7 @@ export default function ComparePage() {
                   ) : (
                     <div className="gradient-card p-6">
                       <p className="text-sm text-muted-foreground text-center py-8">
-                        Sentiment analysis was not requested for this comparison.
+                        {t("compare.sentimentNotRequested")}
                       </p>
                     </div>
                   )}
@@ -841,11 +846,11 @@ export default function ComparePage() {
                           <Sparkles className="w-4 h-4 text-white" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold">AI Comparison Summary</p>
+                          <p className="text-sm font-semibold">{t("compare.aiSummary")}</p>
                           <p className="text-xs text-muted-foreground">
                             {IS_LIVE_API
-                              ? "Generated by GPT-4o · cross-encoder re-ranked sources"
-                              : "Mock narrative · enable backend for live LLM-authored summaries"}
+                              ? t("compare.narrativeLive")
+                              : t("compare.narrativeMock")}
                           </p>
                         </div>
                       </div>
@@ -872,7 +877,7 @@ export default function ComparePage() {
                       <div className="flex items-center gap-2 pt-2 border-t border-white/[0.07]">
                         <Info className="w-3.5 h-3.5 text-muted-foreground" />
                         <p className="text-xs text-muted-foreground">
-                          Sources: {comparison.documentA.name},{" "}
+                          {t("compare.sources")}: {comparison.documentA.name},{" "}
                           {comparison.documentB.name}
                           {comparison.processingTimeMs !== null
                             ? ` · ${(comparison.processingTimeMs / 1000).toFixed(1)}s`
@@ -883,7 +888,7 @@ export default function ComparePage() {
                   ) : (
                     <div className="gradient-card p-6">
                       <p className="text-sm text-muted-foreground text-center py-8">
-                        Narrative generation was disabled for this comparison.
+                        {t("compare.narrativeDisabled")}
                       </p>
                     </div>
                   )}
@@ -913,11 +918,11 @@ export default function ComparePage() {
 
 const STATUS_CHROME: Record<
   string,
-  { icon: React.ElementType; classes: string; label: string }
+  { icon: React.ElementType; classes: string; labelKey: string }
 > = {
-  completed:  { icon: CheckCircle2, classes: "text-emerald-300 bg-emerald-500/10", label: "Done" },
-  processing: { icon: Loader2,      classes: "text-violet-300 bg-violet-500/10",   label: "Running" },
-  failed:     { icon: XCircle,      classes: "text-red-300 bg-red-500/10",         label: "Failed" },
+  completed:  { icon: CheckCircle2, classes: "text-emerald-300 bg-emerald-500/10", labelKey: "compare.statusDone" },
+  processing: { icon: Loader2,      classes: "text-violet-300 bg-violet-500/10",   labelKey: "compare.statusRunning" },
+  failed:     { icon: XCircle,      classes: "text-red-300 bg-red-500/10",         labelKey: "compare.statusFailed" },
 };
 
 function statusChrome(status: string) {
@@ -937,6 +942,7 @@ function RecentComparisons({
   activeId: string | null;
   liveEnabled: boolean;
 }) {
+  const { t } = useTranslation();
   const docMap = useMemo(() => {
     const map = new Map<string, Document>();
     documents.forEach((d) => map.set(d.id, d));
@@ -947,8 +953,7 @@ function RecentComparisons({
     return (
       <div className="rounded-xl border border-dashed border-white/10 px-4 py-3 text-xs text-muted-foreground flex items-center gap-2">
         <History className="w-3.5 h-3.5 text-fin-400" />
-        Connect a backend to load past comparisons. The full history rail
-        appears here once <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> is set.
+        {t("compare.connectBackendHistoryPrefix")} <code className="text-fin-300">NEXT_PUBLIC_API_URL</code> {t("compare.connectBackendHistorySuffix")}
       </div>
     );
   }
@@ -964,7 +969,7 @@ function RecentComparisons({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <History className="w-3.5 h-3.5 text-fin-400" />
-          <span className="text-sm font-semibold">Recent comparisons</span>
+          <span className="text-sm font-semibold">{t("compare.recentComparisons")}</span>
           {query.data && (
             <Badge variant="outline" className="text-[10px] py-0 px-1.5">
               {query.data.length}
@@ -975,7 +980,7 @@ function RecentComparisons({
           onClick={() => query.refetch()}
           disabled={query.isFetching}
           className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-          aria-label="Refresh comparison history"
+          aria-label={t("compare.refreshHistory")}
         >
           <RefreshCw className={cn("w-3.5 h-3.5", query.isFetching && "animate-spin")} />
         </button>
@@ -993,14 +998,14 @@ function RecentComparisons({
         <div className="flex items-start gap-2 py-2 px-3 rounded-md bg-red-500/5 border border-red-500/20 text-xs">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
           <span className="text-red-300">
-            {(query.error as Error)?.message ?? "Could not load comparison history."}
+            {(query.error as Error)?.message ?? t("compare.couldNotLoadHistory")}
           </span>
         </div>
       )}
 
       {!query.isLoading && !query.isError && items.length === 0 && (
         <p className="text-xs text-muted-foreground py-3 text-center">
-          No comparisons yet — run one above to see it here.
+          {t("compare.noComparisonsYet")}
         </p>
       )}
 
@@ -1035,6 +1040,7 @@ function ComparisonChip({
   active: boolean;
   onSelect: (item: ComparisonListItem) => void;
 }) {
+  const { t } = useTranslation();
   const chrome = statusChrome(item.status);
   const StatusIcon = chrome.icon;
   const labelA = docA?.ticker ?? docA?.name ?? item.document_a_id.slice(0, 8);
@@ -1060,7 +1066,7 @@ function ComparisonChip({
           <StatusIcon
             className={cn("w-3 h-3", item.status === "processing" && "animate-spin")}
           />
-          {chrome.label}
+          {t(chrome.labelKey)}
         </span>
         {item.overall_sentiment_shift && item.overall_sentiment_shift !== "stable" && (
           <Badge
@@ -1087,7 +1093,7 @@ function ComparisonChip({
       </div>
 
       <p className="text-[10px] text-muted-foreground mt-1">
-        {item.metrics_with_significant_changes}/{item.total_metrics_compared} significant
+        {t("compare.significant", { changed: item.metrics_with_significant_changes, total: item.total_metrics_compared })}
         {item.processing_time_ms != null && (
           <span> · {(item.processing_time_ms / 1000).toFixed(1)}s</span>
         )}
