@@ -90,12 +90,13 @@ async def _get_document_or_404(
     return doc
 
 
-async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: str) -> None:
+async def _process_document_pipeline(document_id: str, storage_key: str, mime_type: str) -> None:
     """
-    Background task: run extraction → chunking → (Week 3: embedding).
+    Background task: extract → PII scan → chunk → embed → index (all local).
 
-    In local dev this runs in-process via FastAPI BackgroundTasks.
-    In production this is triggered by the SQS consumer Lambda / worker.
+    Reads the uploaded file from local filesystem storage, runs every
+    processing stage in-process, and writes results to PostgreSQL only.
+    No external services (Qdrant, S3, SQS, DynamoDB) are used.
     """
     from app.db.session import AsyncSessionLocal
     from app.services.document.extractor import extract_document
@@ -110,8 +111,8 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             doc.status = DocumentStatus.EXTRACTING
             await db.commit()
 
-            # ── 2. Download from storage ──────────────────────────────────────
-            file_bytes = await asyncio.to_thread(storage.download, s3_key)
+            # ── 2. Read file from local storage ──────────────────────────────
+            file_bytes = await asyncio.to_thread(storage.download, storage_key)
 
             # ── 3. Extract text + tables ──────────────────────────────────────
             extraction = await asyncio.to_thread(
@@ -119,11 +120,10 @@ async def _process_document_pipeline(document_id: str, s3_key: str, mime_type: s
             )
             doc.page_count = extraction.page_count
             doc.status = DocumentStatus.EXTRACTED
-
-            # Write extracted JSON back to storage
-            extracted_key = storage.extracted_key(document_id)
-            await asyncio.to_thread(storage.upload_json, extraction.to_dict(), extracted_key)
-            doc.s3_key_extracted = extracted_key
+            # s3_key_extracted is not used in the local-filesystem pipeline;
+            # the extracted content lives only in memory during this pipeline
+            # run and is not persisted to a separate file.
+            doc.s3_key_extracted = None
             await db.commit()
 
             # ── 3.5. Post-extraction PII scan ─────────────────────────────────
@@ -308,16 +308,23 @@ async def upload_document(
         status=DocumentStatus.UPLOADING,
     )
     db.add(doc)
-    await db.flush()   # get doc.id before S3 upload
+    # Commit the document row immediately so it survives regardless of what
+    # happens during the S3 upload.  A flush() alone keeps the INSERT inside
+    # an open transaction that get_db() would roll back if any later step
+    # raises (e.g. a storage timeout, a Celery dispatch error, or an audit
+    # flush constraint violation).  Committing here makes the row durable and
+    # turns the subsequent steps into independent, recoverable operations.
+    await db.flush()   # surface constraint violations before the S3 round-trip
+    await db.commit()  # persist UPLOADING row — document_id is now durable
     document_id = doc.id
 
-    # ── Upload to S3 ──────────────────────────────────────────────────────────
-    original_s3_key = storage.original_key(document_id, file.filename or "upload")
+    # ── Upload to storage (local filesystem by default, S3 when USE_S3=true) ──
+    storage_key = storage.original_key(document_id, file.filename or "upload")
     try:
         await asyncio.to_thread(
             storage.upload,
             file_bytes,
-            original_s3_key,
+            storage_key,
             mime_type,
             {"document_id": document_id, "uploaded_by": current_user.clerk_user_id},
         )
@@ -325,13 +332,22 @@ async def upload_document(
         log.error("Storage upload failed for document_id=%s: %s", document_id, exc)
         doc.status = DocumentStatus.FAILED
         doc.error_message = f"Storage upload failed: {exc}"
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception as commit_exc:
+            # If we can't persist the FAILED status, log it so the orphaned
+            # UPLOADING row is visible in monitoring rather than disappearing.
+            log.error(
+                "Failed to persist FAILED status for document_id=%s after "
+                "storage error: %s (original error: %s)",
+                document_id, commit_exc, exc,
+            )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Document storage unavailable. Please try again.",
         ) from exc
 
-    doc.s3_key_original = original_s3_key
+    doc.s3_key_original = storage_key
     doc.status = DocumentStatus.UPLOADED
 
     # ── Pre-extraction PII scan (text/plain only, defense-in-depth) ──────────
@@ -363,7 +379,7 @@ async def upload_document(
             from app.services.aws import sqs
             await asyncio.to_thread(
                 sqs.publish_document_uploaded,
-                document_id, workspace_id, original_s3_key, mime_type,
+                document_id, workspace_id, storage_key, mime_type,
             )
         except Exception as exc:
             log.warning("SQS publish failed: %s", exc)
@@ -374,7 +390,7 @@ async def upload_document(
     # When CELERY_TASK_ALWAYS_EAGER=true (tests) the task runs inline.
     try:
         from app.services.tasks import process_document
-        process_document.delay(document_id, original_s3_key, mime_type)
+        process_document.delay(document_id, storage_key, mime_type)
     except Exception as exc:
         # Broker outage must not break the upload — fall back to in-process
         # BackgroundTasks so a single-node dev environment still works.
@@ -382,28 +398,37 @@ async def upload_document(
             "Celery dispatch failed (%s) — falling back to BackgroundTasks", exc,
         )
         background_tasks.add_task(
-            _process_document_pipeline, document_id, original_s3_key, mime_type
+            _process_document_pipeline, document_id, storage_key, mime_type
         )
 
     # ── Audit trail (SEC 17a-4) ────────────────────────────────────────────
-    await record_audit_event(
-        db,
-        action="UPLOAD",
-        resource_type="document",
-        resource_id=document_id,
-        user_id=current_user.id,
-        workspace_id=workspace_id,
-        request=request,
-        status_code=status.HTTP_202_ACCEPTED,
-        metadata={
-            "filename": file.filename,
-            "mime_type": mime_type,
-            "size_bytes": len(file_bytes),
-            "doc_type": doc_type_enum.value,
-            "ticker": doc.ticker,
-            "fiscal_period": fiscal_period,
-        },
-    )
+    # Wrap in try/except so a flush/commit failure inside record_audit_event
+    # (FK violation, config error, DB connection blip) never rolls back the
+    # already-committed document row or changes the 202 response.
+    try:
+        await record_audit_event(
+            db,
+            action="UPLOAD",
+            resource_type="document",
+            resource_id=document_id,
+            user_id=current_user.id,
+            workspace_id=workspace_id,
+            request=request,
+            status_code=status.HTTP_202_ACCEPTED,
+            metadata={
+                "filename": file.filename,
+                "mime_type": mime_type,
+                "size_bytes": len(file_bytes),
+                "doc_type": doc_type_enum.value,
+                "ticker": doc.ticker,
+                "fiscal_period": fiscal_period,
+            },
+        )
+    except Exception as audit_exc:
+        log.warning(
+            "Audit event failed for document_id=%s (upload already committed): %s",
+            document_id, audit_exc,
+        )
 
     return DocumentUploadResponse(
         document_id=document_id,
@@ -744,8 +769,7 @@ async def delete_document(
         except Exception as exc:
             log.warning("Storage delete failed for key %r: %s", s3_key, exc)
 
-    # ── Delete Qdrant vectors (best-effort) ───────────────────────────────────
-    # Bug 2 fix: label said "Pinecone" but the embedder now calls Qdrant.
+    # ── Delete pgvector embeddings (best-effort) ──────────────────────────────
     if chunk_count > 0:
         try:
             from app.services.document.embedder import delete_document_vectors
@@ -753,9 +777,10 @@ async def delete_document(
                 document_id=document_id,
                 workspace_id=workspace_id,
                 chunk_count=chunk_count,
+                db=db,
             )
         except Exception as exc:
-            log.warning("Qdrant vector delete failed for %s: %s", document_id, exc)
+            log.warning("pgvector embedding delete failed for %s: %s", document_id, exc)
 
     # ── Delete DB row (cascades to chunks) ────────────────────────────────────
     await db.delete(doc)

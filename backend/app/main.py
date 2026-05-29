@@ -115,16 +115,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             log.warning("sqs_queue_check_failed", error=str(exc))
 
-    # Ensure DynamoDB audit table exists (if enabled)
-    if settings.USE_DYNAMODB:
-        try:
-            import asyncio
-            from app.services.aws.dynamodb import ensure_audit_table_exists
-            await asyncio.to_thread(ensure_audit_table_exists)
-            log.info("dynamodb_audit_table_ready", table=settings.DYNAMODB_AUDIT_TABLE)
-        except Exception as exc:
-            log.warning("dynamodb_audit_check_failed", error=str(exc))
-
     # Start EDGAR poller
     # PR 2: when running with Celery (the recommended path) Celery Beat owns
     # this schedule. We keep the in-process asyncio fallback for solo dev so

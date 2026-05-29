@@ -1,19 +1,13 @@
 """
-Deprecated — BM25 sparse retrieval moved into Qdrant (PR 2).
+Deprecated — BM25 sparse retrieval superseded by pgvector cosine search.
 
 In v1 of FinSight this module owned a Redis-cached, per-workspace BM25
-index. PR 2 replaces ChromaDB with Qdrant, which stores BM25 sparse vectors
-natively next to the dense vectors and runs Reciprocal Rank Fusion
-server-side (see ``app/services/rag/qdrant_store.py``).
+index. Vector search has since moved to PostgreSQL pgvector (dense cosine
+similarity via the ``<=>`` operator in ``pg_vector_store.py``).
 
 The two public functions are kept as no-op shims so any caller that still
-imports them — typically the historical document-pipeline code path —
-continues to work without modification while we burn down the call sites
-in follow-up PRs. They log a one-line warning the first time they run so
-the deprecation is visible in operations dashboards.
-
-Remove this module entirely once ``ruff check`` confirms it has no
-importers.
+imports them continues to work without modification.
+Remove this module once ``ruff check`` confirms it has no importers.
 """
 from __future__ import annotations
 
@@ -33,8 +27,8 @@ def _warn_once() -> None:
     if _warned:
         return
     log.warning(
-        "app.services.rag.bm25_store is deprecated — Qdrant now stores BM25 "
-        "sparse vectors natively. This call is a no-op."
+        "app.services.rag.bm25_store is deprecated — pgvector handles "
+        "similarity search inside PostgreSQL now. This call is a no-op."
     )
     _warned = True
 

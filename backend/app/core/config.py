@@ -6,8 +6,7 @@ Free service map (all run natively on Windows 11)
 -------------------------------------------------
   LLM          : Groq  (Llama 3.1 70B — 14,400 req/day free)
   Embeddings   : HuggingFace sentence-transformers/all-MiniLM-L6-v2  (local, CPU)
-  Vector store : Qdrant  (single .exe, listens on 6333)
-  BM25         : Qdrant native sparse vectors  (no separate service)
+  Vector store : PostgreSQL pgvector  (same PG instance, no extra service)
   File storage : Local filesystem  (./uploads folder)
   Queue        : Celery ALWAYS_EAGER=true  (inline, no broker needed)
   PII scan     : Microsoft Presidio + spaCy  (local, no cloud)
@@ -89,27 +88,13 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
     EMBEDDING_DIMENSION: int = 384
 
-    # ── Qdrant vector store ───────────────────────────────────────
-    # Download qdrant.exe from https://github.com/qdrant/qdrant/releases
-    # Run it with ./qdrant.exe — no config needed, listens on 6333
-    # Production swap: point QDRANT_URL at a Qdrant Cloud URL + set QDRANT_API_KEY
-    QDRANT_URL: str = "http://localhost:6333"
-    QDRANT_API_KEY: str = ""
-    QDRANT_COLLECTION: str = "finsight_chunks"
-    QDRANT_DENSE_VECTOR_NAME: str = "dense"
-    QDRANT_SPARSE_VECTOR_NAME: str = "sparse"
-    QDRANT_SPARSE_MODEL: str = "Qdrant/bm25"
-
-    # Legacy ChromaDB settings — kept so old .env files don't error out
-    CHROMA_HOST: str = "localhost"
-    CHROMA_PORT: int = 8001
-    CHROMA_COLLECTION: str = "finsight_chunks"
-
-    # ── Redis (cache only) ────────────────────────────────────────
-    # Install from https://github.com/microsoftarchive/redis/releases
-    # Used for response caching only — NOT as a Celery broker
-    REDIS_URL: str = "redis://localhost:6379/0"
-    REDIS_BM25_TTL: int = 604800  # deprecated — kept so old .env files load
+    # ── Vector search — PostgreSQL pgvector ───────────────────────
+    # Requires the pgvector extension in your PostgreSQL instance.
+    # Install: Ubuntu → sudo apt install postgresql-15-pgvector
+    #          macOS  → brew install pgvector
+    #          Docker → use pgvector/pgvector:pg15 image
+    # Migration 0006 runs CREATE EXTENSION IF NOT EXISTS vector automatically.
+    # No extra service or port needed — vectors live in the same PG database.
 
     # ── Celery task queue ─────────────────────────────────────────
     # CELERY_TASK_ALWAYS_EAGER=true  → recommended for local dev on Windows

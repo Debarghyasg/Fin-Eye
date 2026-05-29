@@ -1,30 +1,16 @@
 """
-Hybrid retriever — Qdrant edition (PR 2).
+Retriever — PostgreSQL pgvector edition.
 
-The PDF spec (§4) describes the new design:
-
-    "Native hybrid search in Qdrant: dense + BM25 sparse, single query
-     (top-20). Reciprocal Rank Fusion applied internally by Qdrant."
-
-This module is the thin app-layer wrapper around that single Qdrant call.
-The big-picture diff from the previous (ChromaDB + Redis-BM25 + custom RRF)
-implementation is:
-
-* No Redis BM25 cache to keep in sync — Qdrant stores sparse vectors as
-  payload of each point and queries them server-side.
-* No client-side RRF merge — the ``FusionQuery(fusion=RRF)`` clause on the
-  Qdrant prefetch does it for us.
-* No latent rebuild after a delete — point deletion removes the chunk from
-  both dense and sparse indexes atomically.
+Replaces the Qdrant hybrid-search path.  Dense cosine similarity search
+runs entirely inside PostgreSQL using the pgvector ``<=>`` operator — no
+external service required.
 
 What's preserved
 ----------------
-* The public ``retrieve(request, db, top_k)`` signature, so query-pipeline
-  callers do not change.
-* The result shape returned to the caller: a list of dicts with
-  ``rrf_score``, ``dense_score``, ``sparse_score``, full chunk text, and
-  metadata. Downstream re-rankers and the generator already speak this
-  shape.
+* Public signature: ``retrieve(request, db, top_k) → list[dict]``
+* Result shape returned to the caller: list of dicts with ``rrf_score``
+  (renamed from the pgvector ``score``), full chunk text, and metadata.
+  Downstream re-ranker and generator already speak this shape.
 """
 from __future__ import annotations
 
@@ -35,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.services.rag import qdrant_store
+from app.services.rag import pg_vector_store
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,131 +30,63 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# ── Query-time encoding ───────────────────────────────────────────────────────
+# ── Query-time dense encoding ─────────────────────────────────────────────────
 def _embed_query_dense(query: str) -> list[float]:
     from app.services.document.embedder import _get_embed_model
     return _get_embed_model().encode([query], show_progress_bar=False)[0].tolist()
 
 
-def _embed_query_sparse(query: str):
-    """Return a Qdrant SparseVector for the query."""
-    emb = qdrant_store.encode_sparse_one(query)
-    return qdrant_store.to_qdrant_sparse_vector(emb)
-
-
-# ── Single-call hybrid search ─────────────────────────────────────────────────
-def _qdrant_hybrid_search(
-    dense_vec: list[float],
-    sparse_vec,
-    workspace_id: str,
-    document_ids: list[str] | None,
-    top_k: int,
-) -> list[dict[str, Any]]:
-    """Run dense + BM25 prefetch, fuse with RRF, return scored hits.
-
-    Per-modality scores aren't returned by Qdrant's fusion query, so we fall
-    back to populating ``dense_score``/``sparse_score`` from a second pair
-    of cheap point lookups when callers want them. For the common case those
-    are left at 0 — the RRF score is what the re-ranker keys off anyway.
-    """
-    from qdrant_client.http import models as qm
-
-    client = qdrant_store.get_client()
-    flt = qdrant_store.workspace_filter(workspace_id, document_ids)
-
-    response = client.query_points(
-        collection_name=settings.QDRANT_COLLECTION,
-        prefetch=[
-            qm.Prefetch(
-                query=dense_vec,
-                using=settings.QDRANT_DENSE_VECTOR_NAME,
-                limit=top_k,
-                filter=flt,
-            ),
-            qm.Prefetch(
-                query=sparse_vec,
-                using=settings.QDRANT_SPARSE_VECTOR_NAME,
-                limit=top_k,
-                filter=flt,
-            ),
-        ],
-        query=qm.FusionQuery(fusion=qm.Fusion.RRF),
-        query_filter=flt,           # belt-and-braces: enforce filter on fused result too
-        limit=top_k,
-        with_payload=True,
-        with_vectors=False,
-    )
-
-    hits = response.points if hasattr(response, "points") else response
-    return [
-        {
-            "chunk_id": str(hit.id),
-            "rrf_score": float(hit.score),
-            # Per-modality breakdown isn't returned by FusionQuery; the
-            # re-ranker uses RRF score so this is fine for now.
-            "dense_score": 0.0,
-            "sparse_score": 0.0,
-            "metadata": dict(hit.payload or {}),
-        }
-        for hit in hits
-    ]
-
-
-# ── Postgres enrichment ───────────────────────────────────────────────────────
+# ── PostgreSQL enrichment ─────────────────────────────────────────────────────
 async def _enrich_with_db(
     candidates: list[dict[str, Any]],
     db: "AsyncSession",
 ) -> list[dict[str, Any]]:
-    """Attach full chunk text + DB id + parent document name to each Qdrant hit.
+    """Attach full chunk text + parent document name to each pgvector hit.
 
-    Hits whose ``pinecone_id`` no longer matches a Postgres row are dropped
-    (the chunk was deleted between index time and query time).
-
-    The parent ``Document.original_filename`` is loaded in the same query
-    so the LLM generator can produce human-readable citations like
-    ``[1] Apple_10K_2023.pdf p.23`` instead of opaque ``Document-a3b1c2d4``.
+    Hits whose ``pinecone_id`` no longer matches a Postgres row (deleted
+    between index time and query time) are silently dropped.
     """
     from app.db.models import Chunk, Document
 
     if not candidates:
         return []
 
-    point_ids = [c["chunk_id"] for c in candidates]
+    point_ids = [c["point_id"] for c in candidates]
     rows = (await db.execute(
         select(Chunk, Document.original_filename)
         .join(Document, Document.id == Chunk.document_id)
         .where(Chunk.pinecone_id.in_(point_ids))
     )).all()
-    # Bug 10 fix: SQLAlchemy returns Row(Chunk, str) tuples. The previous code
-    # accessed row.Chunk and row.original_filename which only works when the
-    # columns are mapped by name; the scalar column (original_filename) is
-    # accessible as row[1], not as an attribute on the Row object.
+
+    # Build a lookup: point_id → (Chunk, filename)
     by_point_id: dict[str, tuple] = {row[0].pinecone_id: row for row in rows}
 
     enriched: list[dict[str, Any]] = []
     for cand in candidates:
-        row = by_point_id.get(cand["chunk_id"])
+        row = by_point_id.get(cand["point_id"])
         if row is None:
             log.warning(
-                "Qdrant hit %s has no matching Postgres chunk — skipping",
-                cand["chunk_id"],
+                "pgvector hit point_id=%s has no matching Postgres chunk — skipping",
+                cand["point_id"],
             )
             continue
         chunk: Chunk = row[0]
         original_filename: str = row[1]
         enriched.append({
             "chunk_id":       chunk.id,
-            "qdrant_id":      cand["chunk_id"],
-            "chroma_id":      cand["chunk_id"],
+            "qdrant_id":      cand["point_id"],   # kept for schema compat
+            "chroma_id":      cand["point_id"],   # kept for schema compat
             "document_id":    chunk.document_id,
             "document_name":  original_filename,
             "text":           chunk.text,
             "chunk_type":     chunk.chunk_type,
             "page_number":    chunk.page_number,
             "source_section": chunk.source_section,
-            "rrf_score":      cand["rrf_score"],
-            "dense_score":    cand["dense_score"],
-            "sparse_score":   cand["sparse_score"],
+            # pgvector cosine similarity score (0–1); passed downstream as
+            # rrf_score so the reranker and generator see the same field name.
+            "rrf_score":      cand["score"],
+            "dense_score":    cand["score"],
+            "sparse_score":   0.0,
         })
     return enriched
 
@@ -179,33 +97,36 @@ async def retrieve(
     db: "AsyncSession",
     top_k: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Hybrid retrieval with server-side RRF.
+    """Dense cosine retrieval via PostgreSQL pgvector.
 
-    Failures fall through to an empty result so the query endpoint can still
-    return a graceful "no relevant context found" answer rather than a 500.
+    Failures fall through to an empty result so the query endpoint still
+    returns a graceful "no relevant context found" answer rather than a 500.
     """
     top_k = top_k or settings.RETRIEVER_TOP_K
 
-    # Run both encoders in parallel.
-    dense_task = asyncio.to_thread(_embed_query_dense, request.query)
-    sparse_task = asyncio.to_thread(_embed_query_sparse, request.query)
-    dense_vec, sparse_vec = await asyncio.gather(dense_task, sparse_task)
-
+    # Embed the query (CPU-bound — offload to thread pool).
     try:
-        hits = await asyncio.to_thread(
-            _qdrant_hybrid_search,
-            dense_vec, sparse_vec,
-            request.workspace_id,
-            request.document_ids or None,
-            top_k,
+        dense_vec = await asyncio.to_thread(_embed_query_dense, request.query)
+    except Exception as exc:
+        log.warning("Query embedding failed: %s — returning empty", exc)
+        return []
+
+    # Run pgvector cosine search.
+    try:
+        hits = await pg_vector_store.cosine_search(
+            query_vec=dense_vec,
+            workspace_id=request.workspace_id,
+            document_ids=request.document_ids or None,
+            top_k=top_k,
+            db=db,
         )
     except Exception as exc:
-        log.warning("Qdrant hybrid search failed: %s — returning empty", exc)
+        log.warning("pgvector search failed: %s — returning empty", exc)
         hits = []
 
-    log.debug("Qdrant hybrid hits: %d", len(hits))
+    log.debug("pgvector hits: %d", len(hits))
 
-    candidates = await _enrich_with_db(hits[:top_k], db)
+    candidates = await _enrich_with_db(hits, db)
     log.info(
         "Retrieval: query=%r workspace=%s candidates=%d",
         request.query[:60], request.workspace_id, len(candidates),

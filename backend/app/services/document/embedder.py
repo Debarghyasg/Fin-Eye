@@ -1,28 +1,23 @@
 """
-Embedder service — Qdrant edition (PR 2).
+Embedder service — PostgreSQL pgvector edition.
 
-Replaces the previous ChromaDB integration with Qdrant + fastembed BM25
-sparse vectors. Every chunk is upserted with **two** vectors in a single
-collection:
-
-    dense  → sentence-transformers/all-MiniLM-L6-v2  (384-dim, cosine)
-    sparse → fastembed Qdrant/bm25                   (BM25 on the chunk text)
-
-Hybrid retrieval (see ``retriever.py``) then queries both server-side and
-the Reciprocal Rank Fusion is performed inside Qdrant — no per-workspace
-BM25 index has to be rebuilt anywhere.
+Stores dense embeddings (sentence-transformers/all-MiniLM-L6-v2, 384-dim)
+directly in the ``chunk_embeddings`` table in PostgreSQL.  No external
+vector store service required — pgvector is a PostgreSQL extension that
+ships with standard PostgreSQL 15+.
 
 Pipeline integration
 --------------------
-The chunker writes chunks to Postgres with ``id = uuid4()``. Here we
-overwrite the legacy ``chunks.pinecone_id`` column with the Qdrant point
-id (a UUID5 derived from ``"{doc}_{idx}"``) so retriever joins can find
-the row from a Qdrant hit.
+After chunking, embed_and_index_chunks() is called with the list of
+chunker.Chunk dataclasses.  Each chunk's dense vector is upserted into
+``chunk_embeddings`` (keyed on chunk_id, so re-runs are idempotent).
+The legacy ``chunks.pinecone_id`` column is re-used to store the
+deterministic point UUID so the retriever's join query is unchanged.
 
 Public API
 ----------
-``embed_and_index_chunks(...)``  → upsert all chunks for a document.
-``delete_document_vectors(...)`` → purge a document's points on hard delete.
+``embed_and_index_chunks(...)``  — embed all chunks for a document.
+``delete_document_vectors(...)`` — purge a document's embeddings on delete.
 """
 from __future__ import annotations
 
@@ -34,8 +29,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.models import Chunk as ChunkModel, Document, DocumentStatus
-
-from app.services.rag import qdrant_store
+from app.services.rag import pg_vector_store
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,9 +71,9 @@ async def embed_and_index_chunks(
     fiscal_period: str | None,
     db: "AsyncSession",
 ) -> int:
-    """Embed chunks (dense + sparse) and upsert them to Qdrant.
+    """Embed chunks and upsert them to ``chunk_embeddings`` in PostgreSQL.
 
-    Returns the number of points upserted.
+    Returns the number of rows upserted.
     """
     if not chunks:
         log.warning("embed_and_index_chunks: 0 chunks for doc %s", document_id)
@@ -93,20 +87,11 @@ async def embed_and_index_chunks(
     await db.commit()
 
     log.info(
-        "Embedding %d chunks for document_id=%s dense=%s sparse=%s",
-        len(chunks), document_id, settings.EMBEDDING_MODEL, settings.QDRANT_SPARSE_MODEL,
+        "Embedding %d chunks for document_id=%s model=%s",
+        len(chunks), document_id, settings.EMBEDDING_MODEL,
     )
 
-    # ── Wrap the heavy work in a try/except so a failure here cannot
-    # leave the document permanently stuck at EMBEDDING. The outer
-    # _process_document_pipeline catch logs the exception but doesn't
-    # touch the row, so we own the FAILED transition here. We still
-    # re-raise so the caller's logging fires unchanged. ────────────────
     try:
-        # The collection might be missing if this is the first ever upsert
-        # in a fresh deployment. Cheap idempotent check.
-        await asyncio.to_thread(qdrant_store.ensure_collection)
-
         batch_size = 100
         total_upserted = 0
 
@@ -114,58 +99,60 @@ async def embed_and_index_chunks(
             batch = chunks[batch_start: batch_start + batch_size]
             texts = [c.text for c in batch]
 
-            # Compute dense + sparse in parallel threads — both are CPU-bound.
-            dense_task = asyncio.to_thread(_embed_dense, texts)
-            sparse_task = asyncio.to_thread(qdrant_store.encode_sparse_batch, texts)
-            dense_vectors, sparse_embs = await asyncio.gather(dense_task, sparse_task)
+            # Dense embedding — CPU-bound, offloaded to thread pool.
+            dense_vectors = await asyncio.to_thread(_embed_dense, texts)
 
-            # Build PointStructs in the worker thread (avoids importing qdrant
-            # types inside this async function for clarity).
-            def _build_points():
-                from qdrant_client.http import models as qm
+            # Build the rows for pg_vector_store.upsert_embeddings.
+            rows = []
+            for c, dense_vec in zip(batch, dense_vectors):
+                point_id = pg_vector_store.point_id_for(document_id, c.chunk_index)
+                rows.append({
+                    "chunk_id":    c.chunk_index,  # resolved to DB id below
+                    "document_id": document_id,
+                    "workspace_id": workspace_id,
+                    "point_id":    point_id,
+                    "embedding":   dense_vec,
+                })
 
-                points = []
-                for c, dense_vec, sparse_emb in zip(batch, dense_vectors, sparse_embs):
-                    points.append(qm.PointStruct(
-                        id=qdrant_store.point_id_for(document_id, c.chunk_index),
-                        vector={
-                            settings.QDRANT_DENSE_VECTOR_NAME: dense_vec,
-                            settings.QDRANT_SPARSE_VECTOR_NAME:
-                                qdrant_store.to_qdrant_sparse_vector(sparse_emb),
-                        },
-                        payload={
-                            "document_id":    document_id,
-                            "workspace_id":   workspace_id,
-                            "chunk_index":    c.chunk_index,
-                            "chunk_type":     c.chunk_type.value,
-                            "page_number":    c.page_number or 0,
-                            "source_section": c.source_section or "",
-                            "ticker":         ticker or "",
-                            "fiscal_period":  fiscal_period or "",
-                            "text_preview":   c.text[:500],
-                        },
-                    ))
-                return points
+            # Resolve chunk dataclass indices → Postgres chunk UUIDs in one query.
+            db_chunks_batch = (await db.execute(
+                select(ChunkModel)
+                .where(
+                    ChunkModel.document_id == document_id,
+                    ChunkModel.chunk_index.in_([c.chunk_index for c in batch]),
+                )
+                .order_by(ChunkModel.chunk_index)
+            )).scalars().all()
 
-            points = await asyncio.to_thread(_build_points)
-            await asyncio.to_thread(qdrant_store.upsert_points, points)
+            index_to_id = {ch.chunk_index: ch.id for ch in db_chunks_batch}
 
-            total_upserted += len(batch)
+            # Patch chunk_id with the real UUID and write back point_id.
+            valid_rows = []
+            for row, c in zip(rows, batch):
+                chunk_uuid = index_to_id.get(c.chunk_index)
+                if chunk_uuid is None:
+                    log.warning(
+                        "No DB chunk found for document_id=%s chunk_index=%d — skipping",
+                        document_id, c.chunk_index,
+                    )
+                    continue
+                row["chunk_id"] = chunk_uuid
+                valid_rows.append(row)
+
+            if valid_rows:
+                await pg_vector_store.upsert_embeddings(valid_rows, db)
+
+            # Write point_id back to chunks.pinecone_id so the retriever join works.
+            for ch in db_chunks_batch:
+                ch.pinecone_id = pg_vector_store.point_id_for(document_id, ch.chunk_index)
+                ch.embedding_model = settings.EMBEDDING_MODEL
+
+            total_upserted += len(valid_rows)
+
             log.debug(
-                "Qdrant upsert: doc=%s range=%d–%d",
+                "Embedded batch doc=%s range=%d–%d",
                 document_id, batch_start, batch_start + len(batch),
             )
-
-        # Write Qdrant point IDs back to Postgres so the retriever can look up
-        # full chunk text from a hit. The legacy column name is preserved.
-        db_chunks = (await db.execute(
-            select(ChunkModel)
-            .where(ChunkModel.document_id == document_id)
-            .order_by(ChunkModel.chunk_index)
-        )).scalars().all()
-        for db_chunk in db_chunks:
-            db_chunk.pinecone_id = qdrant_store.point_id_for(document_id, db_chunk.chunk_index)
-            db_chunk.embedding_model = settings.EMBEDDING_MODEL
 
         doc.status = DocumentStatus.INDEXED
         await db.commit()
@@ -194,9 +181,6 @@ async def embed_and_index_chunks(
                     fail_doc.error_message = f"Embedding stage failed: {exc}"
                     await fail_db.commit()
         except Exception as commit_exc:
-            # If we can't even write FAILED, log and let the original
-            # exception propagate; the row will stay at EMBEDDING but at
-            # least the worker logs make the cause clear.
             log.error(
                 "Could not mark document_id=%s as FAILED: %s",
                 document_id, commit_exc,
@@ -209,14 +193,21 @@ async def delete_document_vectors(
     document_id: str,
     workspace_id: str,
     chunk_count: int,
+    db: "AsyncSession | None" = None,
 ) -> None:
-    """Remove all Qdrant points for a document.
+    """Remove all pgvector embedding rows for a document.
 
-    ``chunk_count`` is no longer required (Qdrant deletes by filter), but is
-    kept in the signature so the existing route call site does not have to
-    change in the same PR as the storage swap.
+    ``workspace_id`` and ``chunk_count`` are kept in the signature for
+    backwards compatibility with the existing route call site.
+    A fresh session is opened when ``db`` is not supplied.
     """
     try:
-        await asyncio.to_thread(qdrant_store.delete_by_document_id, document_id)
+        if db is not None:
+            await pg_vector_store.delete_by_document_id(document_id, db)
+        else:
+            from app.db.session import AsyncSessionLocal
+            async with AsyncSessionLocal() as fresh_db:
+                await pg_vector_store.delete_by_document_id(document_id, fresh_db)
+                await fresh_db.commit()
     except Exception as exc:
-        log.error("Qdrant delete failed for document_id=%s: %s", document_id, exc)
+        log.error("pgvector delete failed for document_id=%s: %s", document_id, exc)
