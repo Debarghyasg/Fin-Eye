@@ -43,6 +43,7 @@ import {
 } from "@/lib/api/documents";
 import { getQueryHistory, type QueryHistoryItem } from "@/lib/api/queries";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 
 /**
  * Map the backend's ``DocumentOut`` (snake_case, raw enum values) to the
@@ -119,6 +120,7 @@ function adaptQueryHistoryItem(h: QueryHistoryItem): QueryEntry {
 }
 
 export default function WorkspacePage() {
+  const { t } = useTranslation();
   const documents = useAppStore((s) => s.documents);
   const selectedDocIds = useAppStore((s) => s.selectedDocIds);
   const setSelectedDocIds = useAppStore((s) => s.setSelectedDocIds);
@@ -206,13 +208,13 @@ export default function WorkspacePage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Header
-        title="Document Workspace"
+        title={t("workspace.title")}
         subtitle={
           liveReady && docsQuery.isLoading
-            ? "Loading documents from backend…"
+            ? t("workspace.loadingDocuments")
             : processingCount > 0
-              ? `${indexedCount} indexed · ${processingCount} processing · RAG pipeline active`
-              : `${indexedCount} documents indexed · RAG pipeline active`
+              ? t("workspace.subtitleProcessing", { indexed: indexedCount, processing: processingCount })
+              : t("workspace.subtitleIndexed", { indexed: indexedCount })
         }
       />
 
@@ -224,7 +226,7 @@ export default function WorkspacePage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search documents…"
+                placeholder={t("workspace.searchDocuments")}
                 className="pl-9 h-8 text-xs"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -244,7 +246,7 @@ export default function WorkspacePage() {
                       : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
                   )}
                 >
-                  {s}
+                  {s === "all" ? t("workspace.filterAll") : s === "indexed" ? t("workspace.filterIndexed") : t("workspace.filterProcessing")}
                   {s === "indexed" && indexedCount > 0 && (
                     <span className="ml-1 text-[9px] opacity-70">{indexedCount}</span>
                   )}
@@ -262,7 +264,7 @@ export default function WorkspacePage() {
               onClick={() => setShowUpload(!showUpload)}
             >
               <Plus className="w-4 h-4" />
-              Upload Documents
+              {t("workspace.uploadDocuments")}
             </Button>
           </div>
 
@@ -295,12 +297,12 @@ export default function WorkspacePage() {
                 ) : (
                   <Square className="w-3.5 h-3.5" />
                 )}
-                {allFilteredSelected ? "Deselect all" : "Select all for query"}
+                {allFilteredSelected ? t("workspace.deselectAll") : t("workspace.selectAllForQuery")}
               </button>
               {selectedDocIds.length > 0 && (
                 <span className="inline-flex items-center gap-1 text-[10px] text-fin-300 bg-fin-500/10 px-1.5 py-0.5 rounded-full font-medium">
                   <Filter className="w-2.5 h-2.5" />
-                  {selectedDocIds.length} selected
+                  {t("workspace.selectedCount", { count: selectedDocIds.length })}
                 </span>
               )}
             </div>
@@ -315,7 +317,7 @@ export default function WorkspacePage() {
                   animate={{ opacity: 1 }}
                   className="text-center py-12 text-muted-foreground text-sm"
                 >
-                  No documents found
+                  {t("workspace.noDocumentsFound")}
                 </motion.div>
               ) : (
                 filtered.map((doc, i) => (
@@ -350,7 +352,7 @@ export default function WorkspacePage() {
               className="absolute top-3 right-3 z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-card/90 backdrop-blur text-xs text-muted-foreground hover:text-foreground hover:border-fin-500/40 transition-colors shadow-lg"
             >
               <BookOpen className="w-3.5 h-3.5 text-fin-400" />
-              Sources
+              {t("workspace.sources")}
             </button>
           )}
         </div>

@@ -39,33 +39,34 @@ import {
 } from "@/lib/api";
 import { useWorkspaceId } from "@/lib/use-workspace";
 import { cn, formatNumber, relativeTime } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 
 const ACTION_OPTIONS = [
-  { value: "",         label: "All actions" },
-  { value: "UPLOAD",   label: "Upload" },
-  { value: "DOWNLOAD", label: "Download" },
-  { value: "VIEW",     label: "View" },
-  { value: "DELETE",   label: "Delete" },
-  { value: "UPDATE",   label: "Update" },
-  { value: "QUERY",    label: "Query" },
-  { value: "LOGIN",    label: "Login" },
+  { value: "",         labelKey: "audit.allActions" },
+  { value: "UPLOAD",   labelKey: "audit.actionUpload" },
+  { value: "DOWNLOAD", labelKey: "audit.actionDownload" },
+  { value: "VIEW",     labelKey: "audit.actionView" },
+  { value: "DELETE",   labelKey: "audit.actionDelete" },
+  { value: "UPDATE",   labelKey: "audit.actionUpdate" },
+  { value: "QUERY",    labelKey: "audit.actionQuery" },
+  { value: "LOGIN",    labelKey: "audit.actionLogin" },
 ];
 
 const RESOURCE_OPTIONS = [
-  { value: "",          label: "All resources" },
-  { value: "document",  label: "Document" },
-  { value: "query",     label: "Query" },
-  { value: "workspace", label: "Workspace" },
-  { value: "user",      label: "User" },
-  { value: "alert",     label: "Alert" },
+  { value: "",          labelKey: "audit.allResources" },
+  { value: "document",  labelKey: "audit.resourceDocument" },
+  { value: "query",     labelKey: "audit.resourceQuery" },
+  { value: "workspace", labelKey: "audit.resourceWorkspace" },
+  { value: "user",      labelKey: "audit.resourceUser" },
+  { value: "alert",     labelKey: "audit.resourceAlert" },
 ];
 
-const RANGE_OPTIONS: Array<{ days: number | null; label: string }> = [
-  { days: 1,    label: "Last 24h" },
-  { days: 7,    label: "Last 7d" },
-  { days: 30,   label: "Last 30d" },
-  { days: 90,   label: "Last 90d" },
-  { days: null, label: "All time" },
+const RANGE_OPTIONS: Array<{ days: number | null; labelKey: string }> = [
+  { days: 1,    labelKey: "audit.last24h" },
+  { days: 7,    labelKey: "audit.last7d" },
+  { days: 30,   labelKey: "audit.last30d" },
+  { days: 90,   labelKey: "audit.last90d" },
+  { days: null, labelKey: "audit.allTime" },
 ];
 
 const ACTION_ICON: Record<string, React.ElementType> = {
@@ -93,6 +94,7 @@ const PAGE_SIZE = 50;
 export default function AuditPage() {
   const workspaceId = useWorkspaceId();
   const { getToken } = useAuth();
+  const { t } = useTranslation();
   const liveEnabled = IS_LIVE_API && Boolean(workspaceId);
 
   const [action, setAction] = useState("");
@@ -131,8 +133,8 @@ export default function AuditPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Header
-        title="Audit Trail"
-        subtitle="Immutable compliance log · SEC Rule 17a-4"
+        title={t("audit.title")}
+        subtitle={t("audit.subtitle")}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -143,11 +145,11 @@ export default function AuditPage() {
           className="gradient-card p-4 flex items-center gap-3 flex-wrap"
         >
           <div className="flex items-center gap-2 mr-2 text-xs text-muted-foreground">
-            <Filter className="w-3.5 h-3.5" /> Filters
+            <Filter className="w-3.5 h-3.5" /> {t("audit.filters")}
           </div>
 
           <FilterSelect
-            label="Action"
+            label={t("audit.action")}
             value={action}
             onChange={(v) => {
               setAction(v);
@@ -157,7 +159,7 @@ export default function AuditPage() {
           />
 
           <FilterSelect
-            label="Resource"
+            label={t("audit.resource")}
             value={resourceType}
             onChange={(v) => {
               setResourceType(v);
@@ -169,7 +171,7 @@ export default function AuditPage() {
           <div className="flex items-center gap-1 ml-2">
             {RANGE_OPTIONS.map((r) => (
               <button
-                key={r.label}
+                key={r.labelKey}
                 onClick={() => {
                   setRangeDays(r.days);
                   setPage(1);
@@ -181,7 +183,7 @@ export default function AuditPage() {
                     : "text-muted-foreground hover:text-foreground hover:bg-white/5",
                 )}
               >
-                {r.label}
+                {t(r.labelKey)}
               </button>
             ))}
           </div>
@@ -189,14 +191,14 @@ export default function AuditPage() {
           <div className="ml-auto flex items-center gap-3">
             {auditQuery.data && (
               <Badge variant="outline" className="text-[10px] py-0 px-1.5">
-                {formatNumber(auditQuery.data.total)} events
+                {t("audit.eventsCount", { count: formatNumber(auditQuery.data.total) })}
               </Badge>
             )}
             <button
               onClick={() => auditQuery.refetch()}
               disabled={auditQuery.isFetching || !liveEnabled}
               className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-              aria-label="Refresh audit log"
+              aria-label={t("audit.refreshLog")}
             >
               <RefreshCw
                 className={cn(
@@ -212,11 +214,11 @@ export default function AuditPage() {
         {!liveEnabled && (
           <div className="gradient-card p-8 flex flex-col items-center text-center gap-2">
             <Shield className="w-6 h-6 text-fin-400" />
-            <p className="text-sm font-medium">Compliance trail unavailable</p>
+            <p className="text-sm font-medium">{t("audit.unavailableTitle")}</p>
             <p className="text-xs text-muted-foreground max-w-sm">
-              Connect a backend (set{" "}
-              <code className="text-fin-300">NEXT_PUBLIC_API_URL</code>) and
-              sign in to view your workspace's audit log.
+              {t("audit.unavailablePrefix")}{" "}
+              <code className="text-fin-300">NEXT_PUBLIC_API_URL</code>
+              {t("audit.unavailableSuffix")}
             </p>
           </div>
         )}
@@ -233,9 +235,9 @@ export default function AuditPage() {
           <div className="gradient-card p-5 flex items-start gap-2 border border-red-500/20 bg-red-500/5">
             <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
             <div className="text-xs">
-              <p className="font-medium text-red-300">Could not load audit log</p>
+              <p className="font-medium text-red-300">{t("audit.couldNotLoad")}</p>
               <p className="text-muted-foreground">
-                {(auditQuery.error as Error)?.message ?? "Backend unavailable."}
+                {(auditQuery.error as Error)?.message ?? t("common.backendUnavailable")}
               </p>
             </div>
           </div>
@@ -244,9 +246,9 @@ export default function AuditPage() {
         {liveEnabled && auditQuery.data && auditQuery.data.items.length === 0 && (
           <div className="gradient-card p-8 flex flex-col items-center text-center gap-2">
             <Shield className="w-6 h-6 text-muted-foreground/60" />
-            <p className="text-sm">No audit events match these filters.</p>
+            <p className="text-sm">{t("audit.noEventsMatch")}</p>
             <p className="text-xs text-muted-foreground">
-              Try widening the date range or clearing the action filter.
+              {t("audit.tryWidening")}
             </p>
           </div>
         )}
@@ -263,8 +265,7 @@ export default function AuditPage() {
         {liveEnabled && auditQuery.data && auditQuery.data.total > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-3 border-t border-white/[0.05]">
             <span className="text-xs text-muted-foreground">
-              Page {page} · showing {auditQuery.data.items.length} of{" "}
-              {formatNumber(auditQuery.data.total)}
+              {t("audit.pageInfo", { page, shown: auditQuery.data.items.length, total: formatNumber(auditQuery.data.total) })}
             </span>
             <div className="flex gap-2">
               <Button
@@ -274,7 +275,7 @@ export default function AuditPage() {
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 className="text-xs h-7"
               >
-                Previous
+                {t("common.previous")}
               </Button>
               <Button
                 variant="outline"
@@ -286,7 +287,7 @@ export default function AuditPage() {
                 {auditQuery.isFetching && (
                   <Loader2 className="w-3 h-3 animate-spin" />
                 )}
-                Next
+                {t("common.next")}
               </Button>
             </div>
           </div>
@@ -309,8 +310,9 @@ function FilterSelect({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; labelKey: string }>;
 }) {
+  const { t } = useTranslation();
   return (
     <label className="flex items-center gap-2 text-xs">
       <span className="text-muted-foreground">{label}</span>
@@ -322,7 +324,7 @@ function FilterSelect({
         >
           {options.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.labelKey)}
             </option>
           ))}
         </select>
@@ -333,6 +335,7 @@ function FilterSelect({
 }
 
 function AuditRow({ row }: { row: AuditLogOut }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const ActionIcon = ACTION_ICON[row.action] ?? FileText;
   const colorClass = ACTION_COLOR[row.action] ?? "text-slate-300 bg-slate-500/10";
@@ -411,60 +414,60 @@ function AuditRow({ row }: { row: AuditLogOut }) {
             className="border-t border-white/[0.05] bg-white/[0.01]"
           >
             <div className="px-4 py-3 space-y-2 text-xs">
-              <DetailRow label="Audit ID">
+              <DetailRow label={t("audit.auditId")}>
                 <code className="font-mono text-muted-foreground">{row.id}</code>
               </DetailRow>
               {row.workspace_id && (
-                <DetailRow label="Workspace">
+                <DetailRow label={t("audit.workspace")}>
                   <code className="font-mono text-muted-foreground">
                     {row.workspace_id}
                   </code>
                 </DetailRow>
               )}
               {row.user_id && (
-                <DetailRow label="User">
+                <DetailRow label={t("audit.user")}>
                   <code className="font-mono text-muted-foreground">
                     {row.user_id}
                   </code>
                 </DetailRow>
               )}
               {row.resource_id && (
-                <DetailRow label="Resource ID">
+                <DetailRow label={t("audit.resourceId")}>
                   <code className="font-mono text-muted-foreground">
                     {row.resource_id}
                   </code>
                 </DetailRow>
               )}
               {row.ip_address && (
-                <DetailRow label="IP">
+                <DetailRow label={t("audit.ip")}>
                   <span className="inline-flex items-center gap-1 text-muted-foreground">
                     <Globe className="w-3 h-3" /> {row.ip_address}
                   </span>
                 </DetailRow>
               )}
               {row.user_agent && (
-                <DetailRow label="User-Agent">
+                <DetailRow label={t("audit.userAgent")}>
                   <span className="text-muted-foreground break-all">
                     {row.user_agent}
                   </span>
                 </DetailRow>
               )}
               {row.request_id && (
-                <DetailRow label="Request ID">
+                <DetailRow label={t("audit.requestId")}>
                   <code className="font-mono text-muted-foreground">
                     {row.request_id}
                   </code>
                 </DetailRow>
               )}
-              <DetailRow label="Retention">
+              <DetailRow label={t("audit.retention")}>
                 <span className="text-muted-foreground">
-                  Expires {new Date(row.expires_at).toLocaleString()}
+                  {t("audit.expires", { date: new Date(row.expires_at).toLocaleString() })}
                 </span>
               </DetailRow>
               {row.audit_metadata && (
                 <div>
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground/70 font-medium mb-1">
-                    Metadata
+                    {t("audit.metadata")}
                   </p>
                   <pre className="text-[11px] font-mono p-2 rounded bg-black/30 border border-white/[0.05] overflow-x-auto whitespace-pre-wrap break-all max-h-64">
                     {JSON.stringify(row.audit_metadata, null, 2)}

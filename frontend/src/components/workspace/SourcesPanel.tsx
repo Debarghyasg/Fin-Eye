@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn, relativeTime } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
+import { useTranslation } from "@/lib/i18n";
 
 function ConfidenceBadge({ score }: { score: number }) {
   const color =
@@ -48,6 +49,7 @@ interface SourcesPanelProps {
 }
 
 export function SourcesPanel({ loading = false }: SourcesPanelProps) {
+  const { t } = useTranslation();
   const queryHistory = useAppStore((s) => s.queryHistory);
   const documents = useAppStore((s) => s.documents);
   const setActiveSource = useAppStore((s) => s.setActiveSource);
@@ -83,13 +85,18 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
             <BookOpen className="w-3.5 h-3.5 text-fin-400" />
           </div>
           <div className="leading-tight">
-            <p className="text-sm font-semibold">Sources</p>
+            <p className="text-sm font-semibold">{t("sources.title")}</p>
             <p className="text-[10px] text-muted-foreground">
               {showLoading
-                ? "Retrieving citations…"
+                ? t("sources.retrieving")
                 : enriched.length > 0
-                  ? `${enriched.length} cited from ${new Set(enriched.map((e) => e.docId)).size} doc${new Set(enriched.map((e) => e.docId)).size === 1 ? "" : "s"}`
-                  : "Ready"}
+                  ? (() => {
+                      const docCount = new Set(enriched.map((e) => e.docId)).size;
+                      return docCount === 1
+                        ? t("sources.citedFromOne", { count: enriched.length, docs: docCount })
+                        : t("sources.citedFromOther", { count: enriched.length, docs: docCount });
+                    })()
+                  : t("sources.ready")}
             </p>
           </div>
         </div>
@@ -101,8 +108,8 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
           )}
           <button
             onClick={() => setSourcesPanelOpen(false)}
-            aria-label="Hide sources panel"
-            title="Hide sources panel"
+            aria-label={t("sources.hidePanel")}
+            title={t("sources.hidePanel")}
             className="w-6 h-6 rounded-md hover:bg-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
           >
             <PanelRightClose className="w-3.5 h-3.5" />
@@ -142,7 +149,7 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
               <div className="flex items-center justify-center gap-2 pt-3">
                 <Loader2 className="w-3 h-3 animate-spin text-fin-400" />
                 <p className="text-xs text-muted-foreground">
-                  Hybrid retrieve · cross-encoder rerank…
+                  {t("sources.hybridRerank")}
                 </p>
               </div>
             </motion.div>
@@ -157,12 +164,9 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
               <div className="w-12 h-12 rounded-2xl bg-fin-500/10 border border-fin-500/20 flex items-center justify-center mb-3">
                 <Sparkles className="w-5 h-5 text-fin-400" />
               </div>
-              <h4 className="text-sm font-semibold mb-1">Cited sources will appear here</h4>
+              <h4 className="text-sm font-semibold mb-1">{t("sources.emptyTitle")}</h4>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                When you ask a question, the exact chunks the AI used —
-                with document name, page number, and excerpt — show up in this
-                panel. Click any source to jump straight to the highlighted
-                page in the PDF viewer.
+                {t("sources.emptyDesc")}
               </p>
             </motion.div>
           ) : (
@@ -177,7 +181,7 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
               {latest && (
                 <div className="px-3 py-2 rounded-lg bg-fin-500/5 border border-fin-500/15 mb-3">
                   <p className="text-[10px] uppercase tracking-wide text-fin-400 font-semibold mb-1">
-                    Query
+                    {t("sources.query")}
                   </p>
                   <p className="text-xs text-foreground line-clamp-3">{latest.query}</p>
                 </div>
@@ -214,14 +218,14 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                         <span className="inline-flex items-center gap-0.5">
                           <Hash className="w-2.5 h-2.5" />
-                          page {src.page}
+                          {t("sources.page", { page: src.page })}
                         </span>
                         {src.score > 0 && (
                           <>
                             <span className="text-white/20">·</span>
                             <span className="inline-flex items-center gap-0.5">
                               <TrendingUp className="w-2.5 h-2.5" />
-                              {(src.score * 100).toFixed(0)}% match
+                              {t("sources.match", { pct: (src.score * 100).toFixed(0) })}
                             </span>
                           </>
                         )}
@@ -241,7 +245,7 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
               {latest && (
                 <div className="flex items-center justify-between mt-3 px-1">
                   <span className="text-[10px] text-muted-foreground">
-                    Answer confidence
+                    {t("sources.answerConfidence")}
                   </span>
                   <ConfidenceBadge score={latest.confidence} />
                 </div>
@@ -254,7 +258,7 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
       {/* Footer */}
       <div className="px-3 py-2.5 border-t border-white/[0.07] bg-card/40 flex-shrink-0">
         <p className="text-[10px] text-muted-foreground text-center">
-          Click any source to jump to the highlighted page
+          {t("sources.footerHint")}
         </p>
       </div>
     </aside>

@@ -29,6 +29,7 @@ import {
 import { cn, formatNumber, relativeTime, truncate } from "@/lib/utils";
 import { useWorkspaceId } from "@/lib/use-workspace";
 import { useAppStore } from "@/store/useAppStore";
+import { useTranslation } from "@/lib/i18n";
 
 /* ── Recharts custom tooltip ───────────────────────────────── */
 function CustomTooltip({ active, payload, label }: any) {
@@ -73,6 +74,7 @@ const TICKER_COLORS: Record<string, string> = {
 
 /* ── Recent activity feed ──────────────────────────────────── */
 function ActivityFeed() {
+  const { t } = useTranslation();
   const items: Array<{
     icon: React.ElementType;
     color: string;
@@ -85,7 +87,7 @@ function ActivityFeed() {
     return (
       <div className="flex flex-col items-center justify-center py-10 text-center">
         <Activity className="w-8 h-8 text-muted-foreground/30 mb-2" />
-        <p className="text-xs text-muted-foreground">No recent activity yet</p>
+        <p className="text-xs text-muted-foreground">{t("dashboard.noRecentActivity")}</p>
       </div>
     );
   }
@@ -130,13 +132,13 @@ const MOCK_STAGES: PipelineStageStatus[] = [
 
 const STATUS_CHROME: Record<
   PipelineStageStatus["status"],
-  { dot: string; ping: string; badge: "success" | "warning" | "destructive" | "secondary"; label: string }
+  { dot: string; ping: string; badge: "success" | "warning" | "destructive" | "secondary"; labelKey: string }
 > = {
-  ok:             { dot: "bg-emerald-400", ping: "bg-emerald-400", badge: "success",     label: "Live" },
-  degraded:       { dot: "bg-amber-400",   ping: "bg-amber-400",   badge: "warning",     label: "Degraded" },
-  down:           { dot: "bg-red-500",     ping: "bg-red-500",     badge: "destructive", label: "Down" },
-  not_configured: { dot: "bg-slate-500",   ping: "bg-slate-500",   badge: "secondary",   label: "Not set" },
-  disabled:       { dot: "bg-slate-500",   ping: "bg-slate-500",   badge: "secondary",   label: "Disabled" },
+  ok:             { dot: "bg-emerald-400", ping: "bg-emerald-400", badge: "success",     labelKey: "pipeline.live" },
+  degraded:       { dot: "bg-amber-400",   ping: "bg-amber-400",   badge: "warning",     labelKey: "pipeline.degraded" },
+  down:           { dot: "bg-red-500",     ping: "bg-red-500",     badge: "destructive", labelKey: "pipeline.down" },
+  not_configured: { dot: "bg-slate-500",   ping: "bg-slate-500",   badge: "secondary",   labelKey: "pipeline.notSet" },
+  disabled:       { dot: "bg-slate-500",   ping: "bg-slate-500",   badge: "secondary",   labelKey: "pipeline.disabled" },
 };
 
 function formatStageLatency(stage: PipelineStageStatus): string {
@@ -154,6 +156,7 @@ function PipelineStatus({
   isLoading: boolean;
   isError: boolean;
 }) {
+  const { t } = useTranslation();
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -169,8 +172,8 @@ function PipelineStatus({
       <div className="flex items-start gap-2 py-3 px-3 rounded-lg bg-red-500/5 border border-red-500/20 text-xs">
         <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="font-medium text-red-300">Pipeline status unavailable</p>
-          <p className="text-muted-foreground">Could not reach /analytics/pipeline.</p>
+          <p className="font-medium text-red-300">{t("pipeline.unavailableTitle")}</p>
+          <p className="text-muted-foreground">{t("pipeline.couldNotReach")}</p>
         </div>
       </div>
     );
@@ -203,7 +206,7 @@ function PipelineStatus({
                 {formatStageLatency(stage)}
               </span>
               <Badge variant={chrome.badge} className="text-[9px] py-0 px-1.5">
-                {chrome.label}
+                {t(chrome.labelKey)}
               </Badge>
             </div>
           </motion.div>
@@ -229,21 +232,21 @@ function buildDocTypeData(documents: ReturnType<typeof useAppStore>["documents"]
   }));
 }
 
-function getPipelineSubtitle(
+function getPipelineSubtitleKey(
   pipelineQuery: {
     isLoading: boolean;
     isError: boolean;
     data?: PipelineHealthResponse;
   }
 ): string {
-  if (!IS_LIVE_API) return "All systems operational";
-  if (pipelineQuery.isLoading) return "Checking…";
-  if (pipelineQuery.isError) return "Status unavailable";
+  if (!IS_LIVE_API) return "pipeline.allOperational";
+  if (pipelineQuery.isLoading) return "pipeline.checking";
+  if (pipelineQuery.isError) return "pipeline.statusUnavailable";
   switch (pipelineQuery.data?.overall) {
-    case "ok":       return "All systems operational";
-    case "degraded": return "Some services degraded";
-    case "down":     return "One or more services down";
-    default:         return "Status unknown";
+    case "ok":       return "pipeline.allOperational";
+    case "degraded": return "pipeline.someDegraded";
+    case "down":     return "pipeline.servicesDown";
+    default:         return "pipeline.statusUnknown";
   }
 }
 
@@ -252,6 +255,7 @@ export default function DashboardPage() {
   const [revenueView, setRevenueView] = useState<"area" | "bar">("area");
 
   const { getToken } = useAuth();
+  const { t } = useTranslation();
   const workspaceId = useWorkspaceId();
   const liveEnabled = IS_LIVE_API && Boolean(workspaceId);
 
@@ -300,7 +304,7 @@ export default function DashboardPage() {
 
   // Named function calls instead of IIFEs — avoids Next.js 15 SWC parser bug
   const docTypeData = buildDocTypeData(storeDocuments as any);
-  const pipelineSubtitle = getPipelineSubtitle(pipelineQuery);
+  const pipelineSubtitle = t(getPipelineSubtitleKey(pipelineQuery));
 
   const stagesForRender: PipelineStageStatus[] = pipelineQuery.data?.stages?.length
     ? pipelineQuery.data.stages
@@ -309,8 +313,8 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Header
-        title="Dashboard"
-        subtitle="Portfolio intelligence overview"
+        title={t("dashboard.title")}
+        subtitle={t("dashboard.subtitle")}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -318,23 +322,23 @@ export default function DashboardPage() {
         {/* ── Stat cards ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
-            title="Documents Indexed"
+            title={t("dashboard.documentsIndexed")}
             value={statsQuery.isLoading ? "…" : formatNumber(indexedDocs)}
-            unit={totalDocs != null ? `of ${formatNumber(totalDocs)}` : "files"}
+            unit={totalDocs != null ? t("dashboard.ofN", { count: formatNumber(totalDocs) }) : t("dashboard.files")}
             icon={Database}
             index={0}
           />
           <StatCard
-            title={statsQuery.data ? "Total Queries" : "Queries"}
+            title={statsQuery.data ? t("dashboard.totalQueries") : t("dashboard.queries")}
             value={statsQuery.isLoading ? "…" : formatNumber(totalQueries)}
-            changeLabel={statsQuery.data ? "lifetime" : undefined}
+            changeLabel={statsQuery.data ? t("dashboard.lifetime") : undefined}
             icon={Zap}
             iconColor="text-blue-400"
             iconBg="bg-blue-500/10"
             index={1}
           />
           <StatCard
-            title={statsQuery.data ? "Total Chunks" : "Avg Confidence"}
+            title={statsQuery.data ? t("dashboard.totalChunks") : t("dashboard.avgConfidence")}
             value={
               statsQuery.isLoading
                 ? "…"
@@ -342,14 +346,14 @@ export default function DashboardPage() {
                   ? formatNumber(totalChunks ?? 0)
                   : "0"
             }
-            unit={statsQuery.data ? "chunks" : "%"}
+            unit={statsQuery.data ? t("dashboard.chunks") : "%"}
             icon={TrendingUp}
             iconColor="text-emerald-400"
             iconBg="bg-emerald-500/10"
             index={2}
           />
           <StatCard
-            title={statsQuery.data ? "Failed Documents" : "Active Alerts"}
+            title={statsQuery.data ? t("dashboard.failedDocuments") : t("dashboard.activeAlerts")}
             value={
               statsQuery.isLoading
                 ? "…"
@@ -376,8 +380,8 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Quarterly Revenue Comparison</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Cross-portfolio · Billions USD</p>
+                <h3 className="text-sm font-semibold">{t("dashboard.quarterlyRevenue")}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{t("dashboard.crossPortfolio")}</p>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
@@ -389,7 +393,7 @@ export default function DashboardPage() {
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  Area
+                  {t("dashboard.area")}
                 </button>
                 <button
                   onClick={() => setRevenueView("bar")}
@@ -400,7 +404,7 @@ export default function DashboardPage() {
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  Bar
+                  {t("dashboard.bar")}
                 </button>
               </div>
             </div>
@@ -408,9 +412,9 @@ export default function DashboardPage() {
             {revenueData.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[220px] text-center">
                 <TrendingUp className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No revenue data yet</p>
+                <p className="text-xs text-muted-foreground">{t("dashboard.noRevenue")}</p>
                 <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                  Upload and index filings to populate this chart
+                  {t("dashboard.noRevenueHint")}
                 </p>
               </div>
             ) : (
@@ -466,13 +470,13 @@ export default function DashboardPage() {
             transition={{ delay: 0.35 }}
             className="gradient-card p-5"
           >
-            <h3 className="text-sm font-semibold mb-0.5">Document Types</h3>
-            <p className="text-xs text-muted-foreground mb-4">Corpus breakdown</p>
+            <h3 className="text-sm font-semibold mb-0.5">{t("dashboard.documentTypes")}</h3>
+            <p className="text-xs text-muted-foreground mb-4">{t("dashboard.corpusBreakdown")}</p>
 
             {docTypeData.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[150px] text-center">
                 <PieChartIcon className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No documents yet</p>
+                <p className="text-xs text-muted-foreground">{t("dashboard.noDocuments")}</p>
               </div>
             ) : (
               <>
@@ -533,15 +537,15 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Query Volume — This Week</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Successful vs failed queries</p>
+                <h3 className="text-sm font-semibold">{t("dashboard.queryVolumeWeek")}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{t("dashboard.successfulVsFailed")}</p>
               </div>
             </div>
 
             {queryVolumeData.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[180px] text-center">
                 <BarChart3 className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                <p className="text-xs text-muted-foreground">No query activity yet</p>
+                <p className="text-xs text-muted-foreground">{t("dashboard.noQueryActivity")}</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={180}>
@@ -566,7 +570,7 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">RAG Pipeline</h3>
+                <h3 className="text-sm font-semibold">{t("dashboard.ragPipeline")}</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">{pipelineSubtitle}</p>
               </div>
               <button
@@ -603,11 +607,11 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Recent Activity</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Workspace events</p>
+                <h3 className="text-sm font-semibold">{t("dashboard.recentActivity")}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{t("dashboard.workspaceEvents")}</p>
               </div>
               <Button variant="ghost" size="sm" className="text-xs gap-1 h-7">
-                View all <ArrowRight className="w-3 h-3" />
+                {t("common.viewAll")} <ArrowRight className="w-3 h-3" />
               </Button>
             </div>
             <ActivityFeed />
@@ -622,15 +626,15 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold">Most Queried Documents</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Last 7 days</p>
+                <h3 className="text-sm font-semibold">{t("dashboard.mostQueried")}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{t("dashboard.last7Days")}</p>
               </div>
             </div>
             <div className="space-y-3">
               {topDocuments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <FileText className="w-8 h-8 text-muted-foreground/30 mb-2" />
-                  <p className="text-xs text-muted-foreground">No documents yet</p>
+                  <p className="text-xs text-muted-foreground">{t("dashboard.noDocuments")}</p>
                 </div>
               ) : (
                 topDocuments.map((doc, i) => (
@@ -670,8 +674,8 @@ export default function DashboardPage() {
             >
               <Shield className="w-4 h-4 text-fin-400 flex-shrink-0" />
               <div className="text-xs">
-                <p className="font-semibold text-fin-300">All queries logged</p>
-                <p className="text-muted-foreground">7-year DynamoDB audit trail · SEC Rule 17a-4</p>
+                <p className="font-semibold text-fin-300">{t("dashboard.allQueriesLogged")}</p>
+                <p className="text-muted-foreground">{t("dashboard.auditTrailNote")}</p>
               </div>
             </motion.div>
           </motion.div>

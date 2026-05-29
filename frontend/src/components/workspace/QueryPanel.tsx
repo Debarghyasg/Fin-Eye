@@ -12,21 +12,23 @@ import { useAppStore, type QueryEntry } from "@/store/useAppStore";
 import { useWorkspaceId } from "@/lib/use-workspace";
 import { IS_LIVE_API } from "@/lib/api/client";
 import { submitQuery, type QueryResponse } from "@/lib/api/queries";
+import { useTranslation } from "@/lib/i18n";
 
-const SUGGESTED = [
-  "What was total revenue and YoY growth?",
-  "Summarize the top 5 risk factors",
-  "Compare R&D spend to industry average",
-  "What forward guidance did management give?",
-  "Identify any material changes in debt obligations",
+const SUGGESTED_KEYS = [
+  "query.suggest1",
+  "query.suggest2",
+  "query.suggest3",
+  "query.suggest4",
+  "query.suggest5",
 ];
 
 function ConfidencePill({ score }: { score: number }) {
+  const { t } = useTranslation();
   const color = score >= 0.9 ? "text-emerald-400 bg-emerald-500/10" : score >= 0.75 ? "text-amber-400 bg-amber-500/10" : "text-red-400 bg-red-500/10";
   return (
     <span className={cn("inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full", color)}>
       <span className="w-1 h-1 rounded-full bg-current" />
-      {(score * 100).toFixed(0)}% confidence
+      {t("query.confidence", { pct: (score * 100).toFixed(0) })}
     </span>
   );
 }
@@ -86,6 +88,7 @@ function adaptQueryResponse(r: QueryResponse): QueryEntry {
 }
 
 function QueryBubble({ entry, onDelete }: { entry: QueryEntry; onDelete: (id: string) => void }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(entry.answer);
@@ -133,7 +136,7 @@ function QueryBubble({ entry, onDelete }: { entry: QueryEntry; onDelete: (id: st
             <span className="text-[10px] text-muted-foreground">{relativeTime(entry.timestamp)}</span>
             <div className="ml-auto flex items-center gap-1">
               <button onClick={copy} className="p-1 rounded hover:bg-white/5 text-muted-foreground hover:text-foreground transition-colors">
-                {copied ? <span className="text-[10px] text-fin-400">Copied!</span> : <Copy className="w-3 h-3" />}
+                {copied ? <span className="text-[10px] text-fin-400">{t("query.copied")}</span> : <Copy className="w-3 h-3" />}
               </button>
               <button className="p-1 rounded hover:bg-white/5 text-muted-foreground hover:text-green-400 transition-colors">
                 <ThumbsUp className="w-3 h-3" />
@@ -143,8 +146,8 @@ function QueryBubble({ entry, onDelete }: { entry: QueryEntry; onDelete: (id: st
               </button>
               <button
                 onClick={() => onDelete(entry.id)}
-                aria-label="Delete this message"
-                title="Delete this message"
+                aria-label={t("query.deleteMessage")}
+                title={t("query.deleteMessage")}
                 className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"
               >
                 <Trash2 className="w-3 h-3" />
@@ -199,6 +202,7 @@ function buildMockResponse(query: string, selectedDocIds: string[]): QueryEntry 
  * Sits at the top of the chat panel and is hidden when nothing is selected.
  */
 function SelectionBar() {
+  const { t } = useTranslation();
   const selectedDocIds = useAppStore((s) => s.selectedDocIds);
   const documents = useAppStore((s) => s.documents);
   const clearSelectedDocs = useAppStore((s) => s.clearSelectedDocs);
@@ -217,7 +221,9 @@ function SelectionBar() {
       <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
         <Filter className="w-3.5 h-3.5 text-fin-400 flex-shrink-0" />
         <span className="text-xs text-fin-300 font-medium flex-shrink-0">
-          Querying {selected.length} doc{selected.length === 1 ? "" : "s"}:
+          {selected.length === 1
+            ? t("query.queryingDocsOne", { count: selected.length })
+            : t("query.queryingDocsOther", { count: selected.length })}
         </span>
         <div className="flex flex-wrap gap-1 flex-1">
           {selected.map((d) => (
@@ -235,7 +241,7 @@ function SelectionBar() {
           onClick={clearSelectedDocs}
           className="text-[11px] text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
         >
-          Clear
+          {t("common.clear")}
         </button>
       </div>
     </motion.div>
@@ -243,6 +249,7 @@ function SelectionBar() {
 }
 
 export function QueryPanel() {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(true);
   const queryHistory = useAppStore((s) => s.queryHistory);
@@ -301,9 +308,8 @@ export function QueryPanel() {
         id: `q-err-${Date.now()}`,
         query,
         answer:
-          "**Query failed.** The backend rejected the request — check the browser network tab and the API logs. Common causes: not signed in, no documents indexed yet, or the LLM provider is temporarily unavailable.",
-        sources: [],
-        confidence: 0,
+          t("query.failed"),
+        sources: [],        confidence: 0,
         timestamp: new Date(),
       } as QueryEntry);
     } finally {
@@ -326,14 +332,16 @@ export function QueryPanel() {
       {queryHistory.length > 0 && (
         <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.07]">
           <span className="text-[11px] text-muted-foreground">
-            {queryHistory.length} message{queryHistory.length === 1 ? "" : "s"}
+            {queryHistory.length === 1
+              ? t("query.messagesOne", { count: queryHistory.length })
+              : t("query.messagesOther", { count: queryHistory.length })}
           </span>
           <button
             onClick={() => clearQueries()}
             className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-red-400 transition-colors"
           >
             <Trash2 className="w-3 h-3" />
-            Clear all
+            {t("common.clearAll")}
           </button>
         </div>
       )}
@@ -349,9 +357,9 @@ export function QueryPanel() {
             <div className="w-16 h-16 rounded-2xl bg-fin-500/10 border border-fin-500/20 flex items-center justify-center mb-4 animate-float">
               <Sparkles className="w-7 h-7 text-fin-400" />
             </div>
-            <h3 className="font-semibold text-foreground mb-1">Ask anything about your documents</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("query.emptyTitle")}</h3>
             <p className="text-sm text-muted-foreground max-w-sm">
-              Cross-document queries, metric comparisons, risk factor summaries — all with cited page references.
+              {t("query.emptyDesc")}
             </p>
           </motion.div>
         )}
@@ -387,7 +395,7 @@ export function QueryPanel() {
                   <div className="w-1.5 h-1.5 rounded-full bg-fin-400 loading-dot" />
                   <div className="w-1.5 h-1.5 rounded-full bg-fin-400 loading-dot" />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1">Retrieving · Re-ranking · Generating…</p>
+                <p className="text-[10px] text-muted-foreground mt-1">{t("query.thinking")}</p>
               </div>
             </motion.div>
           )}
@@ -403,15 +411,15 @@ export function QueryPanel() {
             exit={{ opacity: 0, height: 0 }}
             className="px-4 pb-2"
           >
-            <p className="text-xs text-muted-foreground mb-2">Suggested queries</p>
+            <p className="text-xs text-muted-foreground mb-2">{t("query.suggestedTitle")}</p>
             <div className="flex flex-wrap gap-1.5">
-              {SUGGESTED.map((s) => (
+              {SUGGESTED_KEYS.map((key) => (
                 <button
-                  key={s}
-                  onClick={() => submit(s)}
+                  key={key}
+                  onClick={() => submit(t(key))}
                   className="text-xs px-2.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-muted-foreground hover:bg-fin-500/10 hover:border-fin-500/30 hover:text-fin-300 transition-all duration-200"
                 >
-                  {s}
+                  {t(key)}
                 </button>
               ))}
             </div>
@@ -434,8 +442,10 @@ export function QueryPanel() {
             onKeyDown={handleKey}
             placeholder={
               selectedDocIds.length > 0
-                ? `Ask across ${selectedDocIds.length} selected doc${selectedDocIds.length === 1 ? "" : "s"}…`
-                : "Ask a question across your documents… (⏎ to send)"
+                ? selectedDocIds.length === 1
+                  ? t("query.placeholderSelectedOne", { count: selectedDocIds.length })
+                  : t("query.placeholderSelectedOther", { count: selectedDocIds.length })
+                : t("query.placeholderDefault")
             }
             className="flex-1 bg-transparent resize-none text-sm placeholder:text-muted-foreground focus:outline-none max-h-[120px] leading-relaxed py-1"
             style={{ height: "36px" }}
@@ -456,7 +466,7 @@ export function QueryPanel() {
           </motion.button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
-          Hybrid BM25 + vector search · Cross-encoder re-ranking · GPT-4o
+          {t("query.searchFooter")}
         </p>
       </div>
     </div>

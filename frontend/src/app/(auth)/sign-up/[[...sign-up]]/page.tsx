@@ -23,18 +23,25 @@ import { SignUp } from "@clerk/nextjs";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { Check } from "lucide-react";
+import { useTranslation } from "@/lib/i18n";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 
-const features = [
-  "Hybrid RAG with BM25 + vector search",
-  "Cross-encoder re-ranking",
-  "PII detection & KMS encryption",
-  "7-year immutable audit logs",
-  "Automated anomaly detection",
+const FEATURE_KEYS = [
+  "auth.feature1",
+  "auth.feature2",
+  "auth.feature3",
+  "auth.feature4",
+  "auth.feature5",
 ];
 
 export default function SignUpPage() {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen bg-background flex overflow-hidden">
+      {/* Language picker — top-right so users can localise before signing up */}
+      <div className="absolute top-4 right-4 z-20">
+        <LanguageSwitcher />
+      </div>
       {/* Left panel — branding */}
       <motion.div
         initial={{ opacity: 0, x: -30 }}
@@ -73,17 +80,16 @@ export default function SignUpPage() {
             transition={{ delay: 0.3 }}
             className="text-3xl font-bold mb-3 leading-tight"
           >
-            Institutional-grade AI
+            {t("auth.institutionalGrade")}
             <br />
-            <span className="text-gradient">for financial analysts</span>
+            <span className="text-gradient">{t("auth.forAnalysts")}</span>
           </motion.h2>
           <p className="text-muted-foreground mb-8 leading-relaxed">
-            Query 10-Ks, earnings calls, and SEC filings with cited answers,
-            anomaly detection, and full audit trails.
+            {t("auth.queryDesc")}
           </p>
 
           <div className="space-y-3">
-            {features.map((f, i) => (
+            {FEATURE_KEYS.map((f, i) => (
               <motion.div
                 key={f}
                 initial={{ opacity: 0, x: -20 }}
@@ -94,7 +100,7 @@ export default function SignUpPage() {
                 <div className="w-5 h-5 rounded-full bg-fin-500/20 border border-fin-500/40 flex items-center justify-center flex-shrink-0">
                   <Check className="w-3 h-3 text-fin-400" />
                 </div>
-                <span className="text-sm text-muted-foreground">{f}</span>
+                <span className="text-sm text-muted-foreground">{t(f)}</span>
               </motion.div>
             ))}
           </div>
@@ -107,10 +113,10 @@ export default function SignUpPage() {
             </div>
             <div>
               <p className="text-sm font-medium">
-                &ldquo;Replaced 3 hours of analyst work per filing&rdquo;
+                {t("auth.testimonial")}
               </p>
               <p className="text-xs text-muted-foreground">
-                — Fixed Income Team, Major Investment Bank
+                {t("auth.testimonialAuthor")}
               </p>
             </div>
           </div>

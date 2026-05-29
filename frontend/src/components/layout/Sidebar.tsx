@@ -12,18 +12,19 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { useClerk } from "@clerk/nextjs";
+import { useTranslation } from "@/lib/i18n";
 
 const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Workspace", href: "/workspace", icon: FileText },
-  { label: "Compare", href: "/compare", icon: GitCompare },
-  { label: "Analytics", href: "/analytics", icon: BarChart3 },
-  { label: "Alerts", href: "/alerts", icon: Bell },
-  { label: "Audit", href: "/audit", icon: Shield },
+  { labelKey: "nav.dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { labelKey: "nav.workspace", href: "/workspace", icon: FileText },
+  { labelKey: "nav.compare", href: "/compare", icon: GitCompare },
+  { labelKey: "nav.analytics", href: "/analytics", icon: BarChart3 },
+  { labelKey: "nav.alerts", href: "/alerts", icon: Bell },
+  { labelKey: "nav.audit", href: "/audit", icon: Shield },
 ];
 
 const bottomItems = [
-  { label: "Settings", href: "/settings", icon: Settings },
+  { labelKey: "nav.settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {
@@ -31,6 +32,7 @@ export function Sidebar() {
   const router = useRouter();
   const { sidebarCollapsed, setSidebarCollapsed, alerts, documents } = useAppStore();
   const { signOut } = useClerk();
+  const { t } = useTranslation();
   const unread = alerts.filter((a) => !a.read).length;
   const indexedCount = documents.filter((d) => d.status === "indexed").length;
 
@@ -120,7 +122,7 @@ export function Sidebar() {
                         transition={{ duration: 0.15 }}
                         className="relative z-10 overflow-hidden whitespace-nowrap"
                       >
-                        {item.label}
+                        {t(item.labelKey)}
                       </motion.span>
                     )}
                   </AnimatePresence>
@@ -141,7 +143,7 @@ export function Sidebar() {
               return (
                 <Tooltip key={item.href}>
                   <TooltipTrigger asChild>{navLink}</TooltipTrigger>
-                  <TooltipContent side="right">{item.label}</TooltipContent>
+                  <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
                 </Tooltip>
               );
             }
@@ -162,10 +164,12 @@ export function Sidebar() {
               >
                 <div className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-fin-400 animate-pulse" />
-                  <span className="text-xs text-fin-300 font-medium">AI Pipeline Live</span>
+                  <span className="text-xs text-fin-300 font-medium">{t("nav.aiPipelineLive")}</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {indexedCount} doc{indexedCount === 1 ? "" : "s"} indexed
+                  {indexedCount === 1
+                    ? t("nav.docsIndexedOne", { count: indexedCount })
+                    : t("nav.docsIndexedOther", { count: indexedCount })}
                 </p>
               </motion.div>
             )}
@@ -188,7 +192,7 @@ export function Sidebar() {
                         exit={{ opacity: 0 }}
                         className="whitespace-nowrap"
                       >
-                        {item.label}
+                        {t(item.labelKey)}
                       </motion.span>
                     )}
                   </AnimatePresence>
@@ -199,7 +203,7 @@ export function Sidebar() {
               return (
                 <Tooltip key={item.href}>
                   <TooltipTrigger asChild>{link}</TooltipTrigger>
-                  <TooltipContent side="right">{item.label}</TooltipContent>
+                  <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
                 </Tooltip>
               );
             }
@@ -217,7 +221,7 @@ export function Sidebar() {
                   <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">Sign Out</TooltipContent>
+              <TooltipContent side="right">{t("nav.signOut")}</TooltipContent>
             </Tooltip>
           ) : (
             <motion.button
@@ -226,7 +230,7 @@ export function Sidebar() {
               className="w-full flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition-colors duration-200"
             >
               <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
-              <span className="whitespace-nowrap">Sign Out</span>
+              <span className="whitespace-nowrap">{t("nav.signOut")}</span>
             </motion.button>
           )}
         </div>

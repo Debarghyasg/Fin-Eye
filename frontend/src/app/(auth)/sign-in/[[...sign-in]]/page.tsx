@@ -18,10 +18,17 @@
 import { SignIn } from "@clerk/nextjs";
 import Image from "next/image";
 import { motion } from "framer-motion";
+import { useTranslation } from "@/lib/i18n";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 
 export default function SignInPage() {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen bg-background flex items-center justify-center relative overflow-hidden">
+      {/* Language picker — top-right so users can localise before signing in */}
+      <div className="absolute top-4 right-4 z-20">
+        <LanguageSwitcher />
+      </div>
       {/* Background orbs */}
       <motion.div
         className="absolute rounded-full bg-fin-500/10 blur-3xl pointer-events-none"
@@ -66,7 +73,7 @@ export default function SignInPage() {
             Fin<span className="text-fin-400">-</span>Sight
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Financial Document Intelligence
+            {t("auth.tagline")}
           </p>
         </motion.div>
 
@@ -113,7 +120,7 @@ export default function SignInPage() {
           transition={{ delay: 0.5 }}
           className="text-center text-xs text-muted-foreground"
         >
-          SOC 2 Type II · SEC Rule 17a-4 Compliant · AES-256 Encrypted
+          {t("auth.compliance")}
         </motion.p>
       </div>
     </div>
