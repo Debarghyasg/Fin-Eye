@@ -184,7 +184,7 @@ export const mockQueryVolumeData = [
 ];
 
 export const mockDocTypeData = [
-  { name: "10-K Annual", value: 38, color: "#22a269" },
+  { name: "10-K Annual", value: 38, color: "#22c55e" },
   { name: "Earnings Call", value: 24, color: "#47be85" },
   { name: "Prospectus", value: 18, color: "#7dd8ab" },
   { name: "Annual Report", value: 12, color: "#b0eacb" },
@@ -278,7 +278,7 @@ export const mockQueryVolumeTrend = Array.from({ length: 30 }, (_, i) => {
 });
 
 export const mockQueryTypes = [
-  { name: "Financial metrics", value: 42, color: "#22a269" },
+  { name: "Financial metrics", value: 42, color: "#22c55e" },
   { name: "Risk factors", value: 19, color: "#47be85" },
   { name: "Sentiment", value: 14, color: "#7dd8ab" },
   { name: "Comparisons", value: 11, color: "#3b82f6" },
@@ -295,7 +295,7 @@ export const mockMostQueriedDocs = [
 ];
 
 export const mockModelMix = [
-  { name: "llama-3.1-70b-versatile", value: 64, color: "#22a269" },
+  { name: "llama-3.1-70b-versatile", value: 64, color: "#22c55e" },
   { name: "llama-3.1-8b-instant", value: 24, color: "#47be85" },
   { name: "gpt-4o", value: 12, color: "#3b82f6" },
 ];

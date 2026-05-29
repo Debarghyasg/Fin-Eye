@@ -57,7 +57,7 @@ export function Sidebar() {
                 alt="Fin-Sight"
                 width={36}
                 height={36}
-                className="drop-shadow-[0_0_10px_rgba(34,162,105,0.45)]"
+                className="drop-shadow-[0_0_10px_rgba(245,166,35,0.45)]"
                 priority
               />
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-fin-300 animate-pulse-glow" />

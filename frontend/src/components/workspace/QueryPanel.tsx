@@ -120,7 +120,7 @@ function QueryBubble({ entry, onDelete }: { entry: QueryEntry; onDelete: (id: st
 
       {/* AI answer */}
       <div className="flex gap-3">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center flex-shrink-0 mt-0.5 shadow-[0_0_10px_rgba(34,162,105,0.3)]">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center flex-shrink-0 mt-0.5 shadow-[0_0_10px_rgba(245,166,35,0.3)]">
           <Sparkles className="w-3.5 h-3.5 text-white" />
         </div>
         <div className="flex-1 min-w-0 space-y-2">
@@ -386,7 +386,7 @@ export function QueryPanel() {
               exit={{ opacity: 0, y: 10 }}
               className="flex gap-3"
             >
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center flex-shrink-0 shadow-[0_0_10px_rgba(34,162,105,0.3)]">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center flex-shrink-0 shadow-[0_0_10px_rgba(245,166,35,0.3)]">
                 <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
               </div>
               <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-card border border-white/[0.07]">
@@ -458,7 +458,7 @@ export function QueryPanel() {
             className={cn(
               "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-200",
               input.trim() && !isQuerying
-                ? "bg-fin-500 text-white shadow-[0_0_12px_rgba(34,162,105,0.4)] hover:bg-fin-400"
+                ? "bg-fin-500 text-white shadow-[0_0_12px_rgba(245,166,35,0.4)] hover:bg-fin-400"
                 : "bg-white/[0.06] text-muted-foreground"
             )}
           >

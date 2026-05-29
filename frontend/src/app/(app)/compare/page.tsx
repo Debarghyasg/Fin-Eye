@@ -842,7 +842,7 @@ export default function ComparePage() {
                   {comparison.narrative ? (
                     <div className="gradient-card p-6 space-y-5">
                       <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center flex-shrink-0 shadow-[0_0_12px_rgba(34,162,105,0.3)]">
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center flex-shrink-0 shadow-[0_0_12px_rgba(245,166,35,0.3)]">
                           <Sparkles className="w-4 h-4 text-white" />
                         </div>
                         <div>

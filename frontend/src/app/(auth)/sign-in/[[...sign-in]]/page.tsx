@@ -66,7 +66,7 @@ export default function SignInPage() {
             alt="Fin-Sight"
             width={56}
             height={56}
-            className="drop-shadow-[0_0_30px_rgba(34,162,105,0.5)] mb-2"
+            className="drop-shadow-[0_0_30px_rgba(245,166,35,0.5)] mb-2"
             priority
           />
           <h1 className="text-2xl font-bold tracking-tight">
@@ -87,8 +87,8 @@ export default function SignInPage() {
             fallbackRedirectUrl="/dashboard"
             appearance={{
               variables: {
-                colorPrimary: "#22a269",
-                colorBackground: "hsl(222 47% 7%)",
+                colorPrimary: "#f5a623",
+                colorBackground: "hsl(0 0% 11%)",
                 colorInputBackground: "rgba(255,255,255,0.04)",
                 colorText: "#f8fafc",
                 colorTextSecondary: "#94a3b8",

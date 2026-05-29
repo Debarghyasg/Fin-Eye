@@ -165,7 +165,7 @@ function AlertCard({
       className={cn(
         "relative rounded-xl border p-4 cursor-pointer transition-all duration-200 group",
         cfg.bg,
-        !alert.read && "shadow-[0_0_15px_rgba(34,162,105,0.05)]"
+        !alert.read && "shadow-[0_0_15px_rgba(245,166,35,0.05)]"
       )}
     >
       {!alert.read && (
