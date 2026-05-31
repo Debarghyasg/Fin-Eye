@@ -4,7 +4,7 @@ RAG pipeline orchestrator — FREE stack.
 Identical logic to the paid version — only the services underneath changed:
   retrieve()        → ChromaDB dense + BM25 sparse + RRF
   rerank()          → cross-encoder/ms-marco-MiniLM-L-6-v2  (local CPU)
-  generate_answer() → Groq Llama 3.1 70B  (free API)
+  generate_answer() → Groq Llama 3.3 70B  (free API)
 
 Every query is written to query_logs (immutable audit trail).
 """
@@ -166,10 +166,35 @@ async def run_query_pipeline(
 
 
 async def _empty_response(request, user_id, db, latency_ms):
-    from app.db.models import QueryLog
+    from sqlalchemy import func, select
+
+    from app.db.models import Document, DocumentStatus, QueryLog
     from app.db.schemas import QueryResponse
 
-    msg = "No relevant documents found in your workspace for this query."
+    # Distinguish two very different "no results" situations so the user gets
+    # an actionable message instead of a vague "cannot find":
+    #   (a) the workspace has no fully-indexed documents yet  → tell them to
+    #       upload / wait for indexing;
+    #   (b) documents are indexed but none matched this query → the normal
+    #       "no relevant context" outcome.
+    indexed_count = (await db.execute(
+        select(func.count())
+        .select_from(Document)
+        .where(
+            Document.workspace_id == request.workspace_id,
+            Document.status == DocumentStatus.INDEXED,
+        )
+    )).scalar_one()
+
+    if indexed_count == 0:
+        msg = (
+            "No documents have finished indexing in this workspace yet. "
+            "Upload a document and wait until its status shows \"indexed\", "
+            "then ask your question again."
+        )
+    else:
+        msg = "No relevant documents found in your workspace for this query."
+
     query_log = QueryLog(
         user_id=user_id,
         workspace_id=request.workspace_id,

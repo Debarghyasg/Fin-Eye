@@ -295,7 +295,7 @@ export const mockMostQueriedDocs = [
 ];
 
 export const mockModelMix = [
-  { name: "llama-3.1-70b-versatile", value: 64, color: "#22c55e" },
+  { name: "llama-3.3-70b-versatile", value: 64, color: "#22c55e" },
   { name: "llama-3.1-8b-instant", value: 24, color: "#47be85" },
   { name: "gpt-4o", value: 12, color: "#3b82f6" },
 ];
