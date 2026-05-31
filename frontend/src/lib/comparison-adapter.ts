@@ -118,6 +118,26 @@ function classifyDelta(direction: string, delta: number | null): Direction {
   return "flat";
 }
 
+/**
+ * Build a human-readable line for a risk-factor change.
+ *
+ * Models are inconsistent about which field carries the text: sometimes it's
+ * `description`, sometimes only `category` is filled. Previously we read
+ * `description` directly, so a blank description rendered a "NEW" badge with
+ * no text. Prefer `description`, fall back to `category`, and combine them
+ * when both add signal.
+ */
+function riskText(
+  r: { category?: string | null; description?: string | null } | string
+): string {
+  if (typeof r === "string") return r.trim();
+  if (!r || typeof r !== "object") return "";
+  const desc = (r.description ?? "").trim();
+  const cat = (r.category ?? "").trim();
+  if (desc && cat && desc.toLowerCase() !== cat.toLowerCase()) return `${cat}: ${desc}`;
+  return desc || cat || "";
+}
+
 /* ── Live API → normalised ──────────────────────────────────────────────── */
 function adaptLiveMetric(m: FinancialMetricComparison): NormalisedMetric {
   return {
@@ -142,12 +162,14 @@ export function adaptLiveComparison(
   const riskChanges: NormalisedRiskChange[] = [];
   const rfc = result.risk_factor_changes;
   if (rfc) {
-    rfc.added?.forEach((r) =>
-      riskChanges.push({ type: "new", text: r.description })
-    );
-    rfc.removed?.forEach((r) =>
-      riskChanges.push({ type: "removed", text: r.description })
-    );
+    rfc.added?.forEach((r) => {
+      const text = riskText(r);
+      if (text) riskChanges.push({ type: "new", text });
+    });
+    rfc.removed?.forEach((r) => {
+      const text = riskText(r);
+      if (text) riskChanges.push({ type: "removed", text });
+    });
   }
 
   // Sentiment — live API has more structure; collapse to the page's view
