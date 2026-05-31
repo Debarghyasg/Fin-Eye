@@ -16,6 +16,18 @@
 
 ---
 
+## 🎬 Demo
+
+<div align="center">
+  <a href="https://youtu.be/PE4CrusqRfg" target="_blank">
+    <img src="https://img.youtube.com/vi/PE4CrusqRfg/maxresdefault.jpg" alt="Fin-Sight Demo Video" width="800" />
+  </a>
+  <br/>
+  <a href="https://youtu.be/PE4CrusqRfg">▶ Watch the full demo on YouTube</a>
+</div>
+
+---
+
 ## Table of contents
 
 1. [The problem](#1-the-problem)
@@ -64,6 +76,38 @@ It's a working web app: Next.js front-end, FastAPI back-end, and a single Postgr
 The deliberate design choice that makes the $0 budget possible: **the only stateful service is PostgreSQL.** Vectors are stored as JSON in a `chunk_embeddings` table and cosine similarity is computed in Python at query time, so the whole thing runs on a stock PostgreSQL install with zero extensions — and on SQLite in the test suite.
 
 Total runtime cost in dev: **$0**. Total runtime cost in production at 1,000 users: about **$386/month** — roughly **6–7× cheaper** than the equivalent paid stack (see [§6](#6-cost-analysis-at-1000-users)), with the dominant line being GPT-4o vs Groq Llama, not the database.
+
+### Screenshots
+
+<div align="center">
+
+**Landing page — sign in with live market data tickers**
+
+<img src="docs/media/1.png" alt="Fin-Sight sign-in page with live market ticker" width="900" />
+
+<br/><br/>
+
+**Sign-up — institutional-grade positioning with live portfolio chart**
+
+<img src="docs/media/2.png" alt="Fin-Sight sign-up page" width="900" />
+
+<br/><br/>
+
+**Home dashboard — four capabilities, one workspace**
+
+<img src="docs/media/3a.png" alt="Fin-Sight home dashboard" width="900" />
+
+<br/>
+
+<img src="docs/media/3b.png" alt="Fin-Sight home — What you can do and How it works" width="900" />
+
+<br/><br/>
+
+**Document workspace — RAG Q&A with cited sources in real time**
+
+<img src="docs/media/workspace.png" alt="Fin-Sight document workspace with cited Q&A" width="900" />
+
+</div>
 
 ---
 
@@ -208,6 +252,12 @@ For production or advanced local testing, set `CELERY_TASK_ALWAYS_EAGER=false` a
 ### 4.7 PostgreSQL for everything — metadata, audit, *and* vectors
 
 Document metadata, chunks, vector embeddings, audit log, alerts, ticker subscriptions, comparison results — all in one Postgres instance. The audit log alone is justification: SEC Rule 17a-4 requires 7-year retention of business records in non-erasable, non-rewritable storage. PostgreSQL with append-only patterns and the right backup story (point-in-time recovery, immutable S3 backups) maps to that requirement. DynamoDB is wired in as an *optional second* audit destination for projects that want write-once-read-many semantics natively (`USE_DYNAMODB=true`), but it's off by default. Keeping vectors in the same database means one connection pool, one backup, one thing to operate.
+
+**Audit trail — every upload, view, and query is logged immutably (SEC Rule 17a-4):**
+
+<div align="center">
+  <img src="docs/media/4.png" alt="Fin-Sight audit trail — immutable compliance log" width="900" />
+</div>
 
 ### 4.8 Z-score anomaly detection rather than a fancy ML model
 
@@ -473,6 +523,11 @@ CLERK_SECRET_KEY=sk_test_...
 
 Open **http://localhost:3000**, sign up, upload a 10-K, and ask a question.
 
+<div align="center">
+  <img src="docs/media/2.png" alt="Fin-Sight create account page" width="800" />
+  <br/><em>The sign-up page — or continue with Google for one-click access.</em>
+</div>
+
 Verify the backend is healthy:
 ```bash
 curl http://localhost:8000/api/v1/analytics/health
@@ -554,6 +609,14 @@ Fin-Eye/
 ├── local_dev_windows.md                  ← full Windows 11 setup + test guide
 ├── LICENSE
 ├── .github/workflows/backend-tests.yml  ← CI: pytest + 70% coverage gate
+├── docs/
+│   └── media/                           ← screenshots used in this README
+│       ├── 1.png                        ← sign-in page
+│       ├── 2.png                        ← sign-up page
+│       ├── 3a.png                       ← home dashboard
+│       ├── 3b.png                       ← capabilities & how it works
+│       ├── 4.png                        ← audit trail
+│       └── workspace.png                ← document workspace Q&A
 ├── scripts/                              ← developer / ops helper scripts
 ├── theme/                                ← shared design tokens / branding
 ├── frontend/                             ← Next.js 15 + Tailwind + Clerk
