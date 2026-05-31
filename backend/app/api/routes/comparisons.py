@@ -128,6 +128,18 @@ async def run_comparison_pipeline(
         diff = comp_payload["diff"]
         documents = comp_payload["documents"]
 
+        # If metric extraction failed for both documents (e.g. no/invalid LLM
+        # key, or the provider was down), there is nothing to diff and the
+        # comparison would otherwise "complete" with an empty, confusing
+        # result. Capture the extraction error so it can be surfaced below.
+        raw_metrics = comp_payload.get("raw_metrics", {})
+        extraction_errors = [
+            str(m["error"])
+            for m in (raw_metrics.get("a"), raw_metrics.get("b"))
+            if isinstance(m, dict) and m.get("error")
+        ]
+        total_compared = (diff.get("summary") or {}).get("total_metrics_compared", 0)
+
         # 2. Sentiment analysis (optional, runs in parallel for both docs)
         sentiment_comp: dict | None = None
         if include_sentiment:
@@ -177,7 +189,16 @@ async def run_comparison_pipeline(
         comparison.overall_sentiment_shift = _classify_sentiment_shift(
             (sentiment_comp or {}).get("sentiment_shift") if sentiment_comp else None
         )
-        comparison.status = "completed"
+        if total_compared == 0 and extraction_errors:
+            # Surface the real reason via the existing "failed" UI path rather
+            # than returning a completed-but-empty comparison.
+            comparison.status = "failed"
+            comparison.error_message = (
+                "Could not extract financial metrics from these documents: "
+                + "; ".join(dict.fromkeys(extraction_errors))
+            )
+        else:
+            comparison.status = "completed"
         comparison.processing_time_ms = int((time.perf_counter() - started) * 1000)
 
         await session.commit()
