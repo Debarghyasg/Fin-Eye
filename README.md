@@ -20,7 +20,7 @@
 
 <div align="center">
   <a href="https://youtu.be/PE4CrusqRfg" target="_blank">
-    <img src="https://img.youtube.com/vi/PE4CrusqRfg/maxresdefault.jpg" alt="Fin-Sight Demo Video" width="800" />
+    <img src="docs/media/3a.png" alt="Fin-Sight Demo — click to watch on YouTube" width="800" />
   </a>
   <br/>
   <a href="https://youtu.be/PE4CrusqRfg">▶ Watch the full demo on YouTube</a>
