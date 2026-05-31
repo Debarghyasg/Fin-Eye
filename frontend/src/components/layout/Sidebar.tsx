@@ -5,8 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import {
-  LayoutDashboard, FileText, GitCompare, Bell, Settings,
-  ChevronLeft, ChevronRight, BarChart3, Shield, LogOut,
+  Home, LayoutDashboard, FileText, GitCompare, Bell, Settings,
+  BarChart3, Shield, LogOut, Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -15,6 +15,7 @@ import { useClerk } from "@clerk/nextjs";
 import { useTranslation } from "@/lib/i18n";
 
 const navItems = [
+  { labelKey: "nav.home", href: "/home", icon: Home },
   { labelKey: "nav.dashboard", href: "/dashboard", icon: LayoutDashboard },
   { labelKey: "nav.workspace", href: "/workspace", icon: FileText },
   { labelKey: "nav.compare", href: "/compare", icon: GitCompare },
@@ -24,13 +25,14 @@ const navItems = [
 ];
 
 const bottomItems = [
+  { labelKey: "nav.about", href: "/about", icon: Info },
   { labelKey: "nav.settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { sidebarCollapsed, setSidebarCollapsed, alerts, documents } = useAppStore();
+  const { sidebarCollapsed, alerts, documents } = useAppStore();
   const { signOut } = useClerk();
   const { t } = useTranslation();
   const unread = alerts.filter((a) => !a.read).length;
@@ -49,7 +51,7 @@ export function Sidebar() {
         className="relative flex flex-col h-screen border-r border-white/[0.07] bg-card/60 backdrop-blur-xl z-30 overflow-hidden"
       >
         {/* Logo */}
-        <Link href="/dashboard" className="flex items-center h-16 px-4 border-b border-white/[0.07]">
+        <Link href="/home" className="flex items-center h-16 px-4 border-b border-white/[0.07]">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="relative flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center">
               <Image
@@ -234,18 +236,6 @@ export function Sidebar() {
             </motion.button>
           )}
         </div>
-
-        {/* Collapse toggle */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="absolute -right-3 top-20 w-6 h-6 rounded-full border border-white/10 bg-card flex items-center justify-center hover:border-fin-500/40 hover:bg-fin-500/10 transition-all duration-200 z-40"
-        >
-          {sidebarCollapsed ? (
-            <ChevronRight className="w-3 h-3 text-muted-foreground" />
-          ) : (
-            <ChevronLeft className="w-3 h-3 text-muted-foreground" />
-          )}
-        </button>
       </motion.aside>
     </TooltipProvider>
   );

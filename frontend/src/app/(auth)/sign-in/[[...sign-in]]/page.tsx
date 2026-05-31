@@ -13,7 +13,7 @@
  *   - OAuth (Google, GitHub, etc — whatever you enabled in the Clerk dashboard)
  *   - Email verification codes
  *   - Password reset
- *   - Auto-redirect to /dashboard on success (afterSignInUrl)
+ *   - Auto-redirect to /home on success (fallbackRedirectUrl)
  */
 import { SignIn } from "@clerk/nextjs";
 import Image from "next/image";
@@ -84,7 +84,7 @@ export default function SignInPage() {
           transition={{ duration: 0.5, delay: 0.1 }}
         >
           <SignIn
-            fallbackRedirectUrl="/dashboard"
+            fallbackRedirectUrl="/home"
             appearance={{
               variables: {
                 colorPrimary: "#f5a623",
