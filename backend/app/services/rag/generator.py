@@ -192,12 +192,8 @@ async def generate_answer(
             }
 
     answer = result.get("answer", "")
-    citations = result.get("citations", [])
+    raw_citations = result.get("citations", [])
     confidence = float(result.get("confidence", 0.0))
-
-    # Handle both old format (list of ints) and new format (list of dicts)
-    processed_citations = []
-    sources = []
 
     def _safe_index(value) -> int | None:
         """Parse the LLM's chunk_id field to a 0-based reranked_chunks index.
@@ -215,58 +211,72 @@ async def generate_answer(
             return None
         return idx
 
-    if citations:
-        for citation in citations:
-            if isinstance(citation, dict):
-                # New structured format
-                array_idx = _safe_index(citation.get("chunk_id", "0"))
-                if array_idx is None:
-                    log.debug(
-                        "Skipping citation with unparseable chunk_id=%r",
-                        citation.get("chunk_id"),
-                    )
-                    continue
-                chunk = reranked_chunks[array_idx]
-                # Backfill document_name on the citation if the LLM left
-                # it blank — we now have the real filename via the retriever.
-                if not citation.get("document_name"):
-                    citation["document_name"] = chunk.get("document_name") or (
-                        f"Document-{chunk.get('document_id', '')[:8]}"
-                    )
-                processed_citations.append(citation)
-                sources.append({
-                    "chunk_id": chunk.get("chunk_id", ""),
-                    "document_id": chunk.get("document_id", ""),
-                    "page_number": chunk.get("page_number"),
-                    "excerpt": citation.get("excerpt", chunk.get("text", "")[:300]),
-                    "score": chunk.get("rerank_score", chunk.get("rrf_score", 0.0)),
-                })
-            else:
-                # Legacy format (integer indices) — convert to new format.
-                array_idx = _safe_index(citation)
-                if array_idx is None:
-                    log.debug("Skipping unparseable legacy citation %r", citation)
-                    continue
-                chunk = reranked_chunks[array_idx]
-                doc_id = chunk.get("document_id", "")
-                doc_name = chunk.get("document_name") or (
-                    f"Document-{doc_id[:8]}" if doc_id else "Unknown document"
+    def _doc_name(chunk: dict) -> str:
+        name = chunk.get("document_name")
+        if name:
+            return name
+        doc_id = chunk.get("document_id", "")
+        return f"Document-{doc_id[:8]}" if doc_id else "Unknown document"
+
+    # ── Sources ───────────────────────────────────────────────────────────────
+    # Build sources from the chunks ACTUALLY shown to the model, in order.
+    #
+    # Previously `sources` was derived solely from the model's self-reported
+    # `citations` array. When the model wrote inline [N] markers in the answer
+    # but returned an empty or malformed `citations` array (common, especially
+    # on the 8B fallback), `sources` came back empty — so the UI showed bare
+    # citation numbers with no excerpt/page/document behind them.
+    #
+    # The inline [N] markers are 1-based indices into the context numbering
+    # produced by `_build_context`, which is exactly this `reranked_chunks`
+    # order, so source N corresponds to [N]. Deriving sources here guarantees
+    # the user always sees the underlying evidence.
+    sources = []
+    for chunk in reranked_chunks:
+        text = chunk.get("text", "") or ""
+        sources.append({
+            "chunk_id": chunk.get("chunk_id", ""),
+            "document_id": chunk.get("document_id", ""),
+            "document_name": _doc_name(chunk),
+            "page_number": chunk.get("page_number"),
+            "excerpt": text[:300],
+            "score": chunk.get("rerank_score", chunk.get("rrf_score", 0.0)),
+        })
+
+    # ── Citations ─────────────────────────────────────────────────────────────
+    # The model's structured, per-claim references. Best-effort: tolerate dict
+    # and legacy-int shapes, backfill blank fields from the chunk, and skip
+    # anything unparseable. `sources` above already guarantees evidence, so a
+    # missing/garbled citations array no longer hides the source data.
+    processed_citations = []
+    for citation in (raw_citations or []):
+        if isinstance(citation, dict):
+            array_idx = _safe_index(citation.get("chunk_id", "0"))
+            if array_idx is None:
+                log.debug(
+                    "Skipping citation with unparseable chunk_id=%r",
+                    citation.get("chunk_id"),
                 )
-
-                processed_citations.append({
-                    "chunk_id": str(array_idx + 1),
-                    "page_number": chunk.get("page_number"),
-                    "excerpt": chunk.get("text", "")[:200],
-                    "document_name": doc_name,
-                })
-
-                sources.append({
-                    "chunk_id": chunk.get("chunk_id", ""),
-                    "document_id": chunk.get("document_id", ""),
-                    "page_number": chunk.get("page_number"),
-                    "excerpt": chunk.get("text", "")[:300],
-                    "score": chunk.get("rerank_score", chunk.get("rrf_score", 0.0)),
-                })
+                continue
+            chunk = reranked_chunks[array_idx]
+            processed_citations.append({
+                "chunk_id": str(array_idx + 1),
+                "page_number": citation.get("page_number", chunk.get("page_number")),
+                "excerpt": citation.get("excerpt") or (chunk.get("text", "") or "")[:200],
+                "document_name": citation.get("document_name") or _doc_name(chunk),
+            })
+        else:
+            array_idx = _safe_index(citation)
+            if array_idx is None:
+                log.debug("Skipping unparseable legacy citation %r", citation)
+                continue
+            chunk = reranked_chunks[array_idx]
+            processed_citations.append({
+                "chunk_id": str(array_idx + 1),
+                "page_number": chunk.get("page_number"),
+                "excerpt": (chunk.get("text", "") or "")[:200],
+                "document_name": _doc_name(chunk),
+            })
 
     log.info(
         "Generation: model=%s confidence=%.2f citations=%d sources=%d",

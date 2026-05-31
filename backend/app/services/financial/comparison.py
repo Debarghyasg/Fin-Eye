@@ -137,13 +137,25 @@ async def extract_financial_metrics(
         except Exception as exc:
             log.warning("GPT-4o extraction failed: %s — falling back to Groq", exc)
 
-    # Fallback: Groq
+    # Fallback: Groq (primary model, then the smaller/faster fallback model).
+    # Mirrors the RAG generator's resilience — a single model error (e.g. a
+    # decommissioned model, a transient rate limit, or a malformed-JSON blip)
+    # must NOT wipe out the entire comparison's metrics and risk factors.
     if settings.GROQ_API_KEY:
         try:
-            return await _extract_groq(user_prompt, document_metadata)
+            return await _extract_groq(user_prompt, document_metadata, settings.GROQ_MODEL)
         except Exception as exc:
-            log.error("Groq extraction failed: %s", exc)
-            return {"error": f"all providers failed: {exc}"}
+            log.warning(
+                "Groq extraction with %s failed (%s) — retrying with fallback %s",
+                settings.GROQ_MODEL, exc, settings.GROQ_FALLBACK_MODEL,
+            )
+            try:
+                return await _extract_groq(
+                    user_prompt, document_metadata, settings.GROQ_FALLBACK_MODEL
+                )
+            except Exception as exc2:
+                log.error("Groq extraction failed on both models: %s", exc2)
+                return {"error": f"all providers failed: {exc2}"}
 
     return {"error": "no LLM provider configured (set OPENAI_API_KEY or GROQ_API_KEY)"}
 
@@ -174,13 +186,13 @@ async def _extract_openai(user_prompt: str, metadata: dict[str, Any]) -> dict[st
     return metrics
 
 
-async def _extract_groq(user_prompt: str, metadata: dict[str, Any]) -> dict[str, Any]:
+async def _extract_groq(user_prompt: str, metadata: dict[str, Any], model: str) -> dict[str, Any]:
     """Run Groq in a thread because the SDK is sync."""
     def _call() -> dict[str, Any]:
         from groq import Groq
         client = Groq(api_key=settings.GROQ_API_KEY)
         response = client.chat.completions.create(
-            model=settings.GROQ_MODEL,
+            model=model,
             temperature=0.1,
             max_tokens=2500,
             response_format={"type": "json_object"},
@@ -200,7 +212,7 @@ async def _extract_groq(user_prompt: str, metadata: dict[str, Any]) -> dict[str,
 
     metrics = await asyncio.to_thread(_call)
     metrics["_extraction_metadata"] = {
-        "model_used": settings.GROQ_MODEL,
+        "model_used": model,
         "provider": "groq",
         "company": metadata.get("company_name"),
         "period": metadata.get("fiscal_period"),
