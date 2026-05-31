@@ -12,7 +12,7 @@
  *   - Email + password registration
  *   - Email verification code
  *   - OAuth sign-up (Google, GitHub, etc.)
- *   - Auto-redirect to /dashboard on success (afterSignUpUrl)
+ *   - Auto-redirect to /home on success (fallbackRedirectUrl)
  *
  * On first sign-in after registration, the backend's get_current_user
  * dependency auto-creates:
@@ -140,7 +140,7 @@ export default function SignUpPage() {
           </div>
 
           <SignUp
-            fallbackRedirectUrl="/dashboard"
+            fallbackRedirectUrl="/home"
             appearance={{
               variables: {
                 colorPrimary: "#f5a623",

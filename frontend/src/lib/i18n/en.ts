@@ -21,6 +21,7 @@ export const en: Record<string, string> = {
   "common.backendUnavailable": "Backend unavailable.",
 
   // ── Sidebar / navigation ────────────────────────────────────────────
+  "nav.home": "Home",
   "nav.dashboard": "Dashboard",
   "nav.workspace": "Workspace",
   "nav.compare": "Compare",
@@ -32,6 +33,68 @@ export const en: Record<string, string> = {
   "nav.aiPipelineLive": "AI Pipeline Live",
   "nav.docsIndexedOne": "{count} doc indexed",
   "nav.docsIndexedOther": "{count} docs indexed",
+
+  // ── Home / overview ─────────────────────────────────────────────────
+  "home.title": "Home",
+  "home.subtitle": "Welcome to Fin-Sight",
+  "home.heroBadge": "Financial Document Intelligence",
+  "home.heroTitle": "Turn 300-page filings into cited answers",
+  "home.heroLead":
+    "Fin-Sight is a financial document intelligence platform. Upload a 10-K, 10-Q, or earnings filing, ask a question in plain English, and get an answer that points to the exact page and paragraph it came from.",
+  "home.ctaWorkspace": "Open Workspace",
+  "home.ctaDashboard": "View Dashboard",
+
+  "home.problemTitle": "The problem it solves",
+  "home.problemBody":
+    "A single 10-K runs 200–400 pages of statements, MD&A, risk factors, and footnotes. Finding one number — or checking whether the risk language changed — is slow, repetitive work that an analyst repeats for every name, every quarter. Fin-Sight makes that a search you can trust: ask in English, get a cited answer in seconds.",
+
+  "home.capabilitiesTitle": "What you can do",
+  "home.capabilitiesLead": "Four capabilities, one workspace.",
+  "home.cap1Title": "Cited Q&A",
+  "home.cap1Desc":
+    "Ask a filing a question in plain English and get an answer with citations to the exact page and excerpt — every claim is verifiable.",
+  "home.cap2Title": "Document Comparison",
+  "home.cap2Desc":
+    "Compare two filings side by side: metric deltas, risk-factor diffs, a sentiment shift, and a short AI executive summary.",
+  "home.cap3Title": "Anomaly Alerts",
+  "home.cap3Desc":
+    "Each new filing's metrics join a per-ticker time series; any value beyond 2σ raises an alert with severity tied to how far it strays.",
+  "home.cap4Title": "SEC Filing Watch",
+  "home.cap4Desc":
+    "A background poller checks SEC EDGAR against your watchlist and notifies you in-app and by email when something new lands.",
+
+  "home.howTitle": "How it works",
+  "home.howLead": "Answers are grounded in your documents — nothing is invented.",
+  "home.step1Title": "Upload",
+  "home.step1Desc": "Drop in a 10-K, 10-Q, or earnings PDF.",
+  "home.step2Title": "Extract & chunk",
+  "home.step2Desc": "Prose and tables are parsed and split intelligently.",
+  "home.step3Title": "Embed & index",
+  "home.step3Desc": "Local vectors are stored for fast similarity search.",
+  "home.step4Title": "Retrieve & rerank",
+  "home.step4Desc": "Dense search plus a cross-encoder surface the best passages.",
+  "home.step5Title": "Cited answer",
+  "home.step5Desc": "The model answers using only retrieved context.",
+
+  "home.whyTitle": "Built for trust",
+  "home.why1Title": "Every claim is cited",
+  "home.why1Desc": "Answers resolve back to a page and paragraph you can verify yourself.",
+  "home.why2Title": "Compliance-ready",
+  "home.why2Desc": "An immutable 7-year audit trail aligned with SEC Rule 17a-4.",
+  "home.why3Title": "Private by design",
+  "home.why3Desc": "PII is scanned before storage and embeddings run locally.",
+
+  "home.quickLinksTitle": "Jump back in",
+  "home.quickLinksLead": "Pick up where you left off.",
+  "home.linkWorkspaceDesc": "Upload filings and ask questions",
+  "home.linkCompareDesc": "Diff two filings side by side",
+  "home.linkAnalyticsDesc": "Usage, confidence, and token trends",
+  "home.linkAlertsDesc": "Anomalies and new-filing notices",
+
+  // ── About ───────────────────────────────────────────────────────────
+  "nav.about": "About",
+  "about.title": "About",
+  "about.subtitle": "The project, the stack, and the maker",
 
   // ── Header + mock-mode banner ───────────────────────────────────────
   "header.mockMode": "Mock mode — not connected to the database.",

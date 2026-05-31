@@ -4,7 +4,7 @@
  *
  * Bug fixed: previously redirected every visitor straight to /dashboard
  * regardless of whether they were signed in. Now:
- *   - Signed in  → /dashboard
+ *   - Signed in  → /home
  *   - Not signed in → /sign-in
  *
  * useAuth() returns isLoaded=false on the first render (Clerk is hydrating).
@@ -21,7 +21,7 @@ export default function RootPage() {
   useEffect(() => {
     if (!isLoaded) return; // wait for Clerk to hydrate
     if (isSignedIn) {
-      router.replace("/dashboard");
+      router.replace("/home");
     } else {
       router.replace("/sign-in");
     }
