@@ -215,7 +215,7 @@ export default function AboutPage() {
     { icon: Server, label: "FastAPI", tint: "text-emerald-400" },
     { icon: Database, label: "PostgreSQL 16", tint: "text-blue-400" },
     { icon: Cpu, label: "MiniLM (local CPU)", tint: "text-fin-400" },
-    { icon: Sparkles, label: "Groq · Llama 3.1 70B", tint: "text-orange-400" },
+    { icon: Sparkles, label: "Groq · Llama 3.3 70B", tint: "text-orange-400" },
     { icon: FileText, label: "PyMuPDF · pdfplumber", tint: "text-violet-400" },
     { icon: Shield, label: "Clerk auth", tint: "text-sky-400" },
     { icon: Lock, label: "Presidio PII scan", tint: "text-rose-400" },

@@ -4,7 +4,7 @@ Pydantic Settings — all configuration loaded from environment variables / .env
 
 Free service map (all run natively on Windows 11)
 -------------------------------------------------
-  LLM          : Groq  (Llama 3.1 70B — 14,400 req/day free)
+  LLM          : Groq  (Llama 3.3 70B — 14,400 req/day free)
   Embeddings   : HuggingFace sentence-transformers/all-MiniLM-L6-v2  (local, CPU)
   Vector store : PostgreSQL pgvector  (same PG instance, no extra service)
   File storage : Local filesystem  (./uploads folder)
@@ -74,7 +74,11 @@ class Settings(BaseSettings):
     # ── Groq LLM (free) ──────────────────────────────────────────
     # Free key at https://console.groq.com — 14,400 req/day, 6,000 tok/min
     GROQ_API_KEY: str = Field(default="", description="gsk_... from console.groq.com")
-    GROQ_MODEL: str = "llama-3.1-70b-versatile"
+    # NOTE: llama-3.1-70b-versatile was decommissioned by Groq (Jan 2025).
+    # The current production-grade replacement is llama-3.3-70b-versatile.
+    # Using a decommissioned model makes every generation call 400 and the
+    # query degrade to a "cannot find / unavailable" answer.
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
     GROQ_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
 
     # ── OpenAI (optional — only for document comparison) ─────────
