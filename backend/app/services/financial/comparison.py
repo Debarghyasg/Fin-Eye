@@ -13,7 +13,7 @@ Metrics extracted:
   - Key risk factors
   - Management guidance and outlook tone
 
-Falls back to Groq Llama-3.1-70b if OPENAI_API_KEY is not configured.
+Falls back to Groq Llama-3.3-70b if OPENAI_API_KEY is not configured.
 """
 from __future__ import annotations
 

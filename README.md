@@ -59,7 +59,7 @@ Fin-Sight is a multi-tenant RAG platform with four user-facing capabilities:
 3. **Anomaly alerts** — every new filing's metrics are written to a per-ticker time series; values that fall more than 2σ outside the historical mean fire an alert with severity tied to |z|.
 4. **Proactive SEC filing watch** — a background poller checks SEC EDGAR for new filings against the user's watchlist and pushes alerts (in-app + email).
 
-It's a working web app: Next.js front-end, FastAPI back-end, and a single PostgreSQL database that holds **everything that matters** — document metadata, chunks, the audit log, alerts, ticker subscriptions, comparison results, *and the vector embeddings themselves*. There is no separate vector database, no Redis, and no message broker in the default setup. Auth is Clerk. The LLM is Llama 3.1 70B served through Groq. Every embedding runs locally on CPU.
+It's a working web app: Next.js front-end, FastAPI back-end, and a single PostgreSQL database that holds **everything that matters** — document metadata, chunks, the audit log, alerts, ticker subscriptions, comparison results, *and the vector embeddings themselves*. There is no separate vector database, no Redis, and no message broker in the default setup. Auth is Clerk. The LLM is Llama 3.3 70B served through Groq. Every embedding runs locally on CPU.
 
 The deliberate design choice that makes the $0 budget possible: **the only stateful service is PostgreSQL.** Vectors are stored as JSON in a `chunk_embeddings` table and cosine similarity is computed in Python at query time, so the whole thing runs on a stock PostgreSQL install with zero extensions — and on SQLite in the test suite.
 
@@ -138,7 +138,7 @@ INDEXED     → metric history populated for anomaly detection
 1. embed_query()    → all-MiniLM-L6-v2  (~10 ms on CPU)
 2. cosine_search()  → chunk_embeddings, NumPy cosine in Python, top-20, filtered by workspace_id
 3. cross_encoder()  → ms-marco-MiniLM-L-6-v2 reorders 20 → 5
-4. groq_chat()      → Llama 3.1 70B with JSON mode + citation prompt
+4. groq_chat()      → Llama 3.3 70B with JSON mode + citation prompt
 5. write_query_log()→ immutable audit row (PostgreSQL + DynamoDB if USE_DYNAMODB=true)
 ```
 
@@ -183,9 +183,9 @@ The trade-off is latency: cross-encoders are too slow to run on a whole corpus, 
 
 The choice has knock-on effects: vectors are 384-dim instead of 1,536-dim, so storage drops by 4×, the JSON rows in `chunk_embeddings` stay small, and the in-Python dot products are faster.
 
-### 4.4 Groq + Llama 3.1 70B for the LLM
+### 4.4 Groq + Llama 3.3 70B for the LLM
 
-Groq's free tier is 14,400 requests/day and 6,000 tokens/minute. At 1,000 users × 10 queries/day = 10k requests/day, we are *under* the free tier. The model is also genuinely fast — Groq's specialised hardware returns `llama-3.1-70b-versatile` output in 300–800 ms, which is faster than GPT-4o.
+Groq's free tier is 14,400 requests/day and 6,000 tokens/minute. At 1,000 users × 10 queries/day = 10k requests/day, we are *under* the free tier. The model is also genuinely fast — Groq's specialised hardware returns `llama-3.3-70b-versatile` output in 300–800 ms, which is faster than GPT-4o. (Groq decommissioned the original `llama-3.1-70b-versatile`; `llama-3.3-70b-versatile` is the drop-in replacement.)
 
 The downside: Groq's free tier has a TPM ceiling that becomes painful at burst. The fallback path swaps to `llama-3.1-8b-instant` automatically on any primary-model error (rate limit, timeout, malformed JSON), so the user-visible failure mode is degraded answer quality for a few seconds rather than an outage. OpenAI GPT-4o is wired in as an *optional* upgrade for the comparison feature only; leave `OPENAI_API_KEY` blank and Groq handles everything.
 

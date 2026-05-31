@@ -1,11 +1,11 @@
 """
-LLM answer generator — FREE stack (Groq + Llama 3.1 70B).
+LLM answer generator — FREE stack (Groq + Llama 3.3 70B).
 
 Groq free tier
 --------------
   - 14,400 requests/day
   - 6,000 tokens/minute
-  - Model: llama-3.1-70b-versatile  (best quality)
+  - Model: llama-3.3-70b-versatile  (best quality; replaces the decommissioned llama-3.1-70b-versatile)
   - Fallback: llama-3.1-8b-instant  (faster, lower quality)
   - Sign up free at https://console.groq.com
 
@@ -160,7 +160,7 @@ async def generate_answer(
             "answer":     "...",
             "citations":  [{"chunk_id": "1", "page_number": 15, "excerpt": "...", "document_name": "..."}],
             "confidence": 0.91,
-            "model_used": "llama-3.1-70b-versatile",
+            "model_used": "llama-3.3-70b-versatile",
             "sources":    [{chunk_id, document_id, page_number, excerpt, score}, ...]
         }
     """

@@ -52,7 +52,7 @@ scipy==1.14.1                    # Required for FinBERT preprocessing
 #   Docker        : use pgvector/pgvector:pg15 image
 # No Python package required — all vector I/O uses raw SQL via asyncpg.
 
-# ── FREE: Groq LLM (Llama 3.1 70B, 14 400 req/day free) ────────
+# ── FREE: Groq LLM (Llama 3.3 70B, 14 400 req/day free) ────────
 groq==0.9.0                      # official Groq Python client
 
 # ── OpenAI (GPT-4o for advanced financial intelligence) ──────────
