@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -223,13 +224,34 @@ async def _extract_groq(user_prompt: str, metadata: dict[str, Any], model: str) 
 
 # ── Diff helpers ──────────────────────────────────────────────────────────────
 def _safe_float(val: Any) -> Optional[float]:
-    """Coerce LLM output to float; return None for missing/invalid."""
-    if val is None:
+    """Coerce LLM output to float; return None for missing/invalid.
+
+    Tolerates the formatted-number strings models routinely emit despite the
+    "numbers only" instruction — e.g. "$383,000", "1,200", "44.1%", and
+    accounting-style negatives "(1,234)". Without this, a single formatted
+    value silently drops the whole metric from the comparison (which is why
+    the Compare page could show no financial metrics at all).
+    """
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        f = float(val)
+        return f if math.isfinite(f) else None
+    s = str(val).strip()
+    if not s:
+        return None
+    negative = s.startswith("(") and s.endswith(")")
+    # Strip parentheses, currency symbols, thousands separators, percent signs.
+    s = s.strip("()").replace(",", "").replace("$", "").replace("%", "").strip()
+    if not s:
         return None
     try:
-        return float(val)
+        f = float(s)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(f):
+        return None
+    return -f if negative else f
 
 
 def _direction(change: float) -> str:
@@ -283,12 +305,19 @@ def calculate_change(
 
 
 def _extract_metric_value(metrics: dict[str, Any], path: list[str]) -> Optional[float]:
-    """Walk a nested dict path, coerce to float."""
+    """Walk a nested dict path, coerce to float.
+
+    Tolerates the common case where the model flattens a structured object
+    like ``{"revenue": {"value": 383000}}`` into a bare ``{"revenue": 383000}``
+    — once we descend to a scalar we stop and use it, instead of returning
+    None and dropping the metric.
+    """
     cur: Any = metrics
     for key in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
+        if isinstance(cur, dict):
+            cur = cur.get(key)
+        else:
+            break  # reached a scalar before the path ended — model flattened it
         if cur is None:
             return None
     return _safe_float(cur)
