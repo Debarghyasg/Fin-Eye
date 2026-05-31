@@ -21,6 +21,7 @@
  */
 import React, { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity, AlertCircle, AlertTriangle, Bell, Check,
@@ -137,6 +138,7 @@ export function SubscribeTickerDialog({
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [success, setSuccess] = useState<TickerSubscription | null>(null);
   const queryClient = useQueryClient();
+  const { getToken } = useAuth();
   const { t } = useTranslation();
 
   // Reset form whenever the dialog reopens
@@ -152,7 +154,7 @@ export function SubscribeTickerDialog({
 
   // Live mode mutation
   const liveMutation = useMutation<TickerSubscription, ApiError, CreateSubscriptionInput>({
-    mutationFn: (input) => createSubscription(input),
+    mutationFn: (input) => createSubscription(input, getToken),
     onSuccess: (sub) => {
       // Refetch the list so the page reflects the new subscription
       queryClient.invalidateQueries({ queryKey: ["subscriptions"] });

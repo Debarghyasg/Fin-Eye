@@ -380,7 +380,7 @@ export default function ComparePage() {
         document_b_id: docB.id,
         include_sentiment: true,
         include_narrative: true,
-      });
+      }, getToken);
       // 201 returns "processing" — render the partial then poll
       setComparison(adaptLiveComparison(initial));
 
@@ -391,6 +391,7 @@ export default function ComparePage() {
             Math.min(prev + 1, PROGRESS_STEPS_LIVE.length - 1)
           );
         },
+        getToken,
       });
 
       if (final.status === "failed") {

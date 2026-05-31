@@ -20,6 +20,7 @@
  */
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity, AlertTriangle, Bell, BellOff, Check, ChevronRight,
@@ -352,6 +353,7 @@ function StatPill({
 export default function AlertsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { getToken } = useAuth();
 
   // Resolve the user's real workspace UUID once and share with every
   // call below (including SubscribeTickerDialog). Falls back to "default"
@@ -374,14 +376,14 @@ export default function AlertsPage() {
   // ── Live-mode queries (no-op when IS_LIVE_API is false) ───────────────
   const liveAlertsQuery = useQuery<AlertListResponse, ApiError>({
     queryKey: ["alerts"],
-    queryFn: () => listAlerts({ limit: 100 }),
+    queryFn: () => listAlerts({ limit: 100 }, getToken),
     enabled: IS_LIVE_API,
     refetchInterval: 30_000, // poll every 30s for new anomalies / filings
   });
 
   const liveSubsQuery = useQuery<TickerSubscription[], ApiError>({
     queryKey: ["subscriptions"],
-    queryFn: () => listSubscriptions(),
+    queryFn: () => listSubscriptions(undefined, getToken),
     enabled: IS_LIVE_API,
     staleTime: 60_000,
   });
@@ -389,18 +391,18 @@ export default function AlertsPage() {
   // ── Subscription mutations (live only) ────────────────────────────────
   const updateSubMutation = useMutation({
     mutationFn: (args: { id: string; patch: Partial<TickerSubscription> }) =>
-      updateSubscription(args.id, args.patch),
+      updateSubscription(args.id, args.patch, getToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
   });
 
   const deleteSubMutation = useMutation({
-    mutationFn: (id: string) => deleteSubscription(id),
+    mutationFn: (id: string) => deleteSubscription(id, getToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
   });
 
   // ── Mark-read mutations (live) with optimistic update ─────────────────
   const markReadMutation = useMutation({
-    mutationFn: (id: string) => apiMarkRead(id),
+    mutationFn: (id: string) => apiMarkRead(id, getToken),
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: ["alerts"] });
       const prev = queryClient.getQueryData<AlertListResponse>(["alerts"]);
@@ -420,13 +422,13 @@ export default function AlertsPage() {
   });
 
   const markAllReadMutation = useMutation({
-    mutationFn: () => apiMarkAllRead(),
+    mutationFn: () => apiMarkAllRead(undefined, getToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
   });
 
   // ── EDGAR manual-poll mutation ────────────────────────────────────────
   const edgarPollMutation = useMutation({
-    mutationFn: () => triggerEdgarPoll(false),
+    mutationFn: () => triggerEdgarPoll(false, getToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
   });
 
