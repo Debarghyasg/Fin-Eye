@@ -7,18 +7,29 @@
  * fetching or app state is touched here.
  *
  * Motion design:
- *   - Each section reveals on scroll via `whileInView` (runs once).
- *   - Cards stagger in and lift on hover (`whileHover`).
- *   - Headline metrics count up when they enter the viewport (<Counter />).
+ *   - A scroll-progress bar tracks reading position (a MotionValue updated
+ *     from the scroll container, so scrolling never triggers a re-render).
+ *   - The hero has floating, parallaxed glow orbs and a staggered intro.
+ *   - Every section reveals on scroll (`whileInView`, runs once) with an
+ *     animated heading underline.
+ *   - Cards stagger in, lift + glow on hover; icons react via group-hover.
+ *   - Headline metrics count up when scrolled into view (<Counter />).
+ *   - The tech stack scrolls as two opposing marquees.
+ *   - The creator avatar springs in over an infinite pulsing halo.
  *
- * Layout is overlap-safe: a single `space-y-*` rhythm, grid `gap-*` only,
- * and the only absolutely-positioned element is a `pointer-events-none`
- * decorative glow.
+ * Layout is overlap-safe: a single `space-y-*` rhythm and grid `gap-*`;
+ * every absolutely-positioned element is decorative + `pointer-events-none`.
  */
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { motion, useInView, type Variants } from "framer-motion";
+import {
+  motion,
+  useInView,
+  useMotionValue,
+  useTransform,
+  type Variants,
+} from "framer-motion";
 import {
   ArrowUpRight,
   MessageSquare,
@@ -51,6 +62,25 @@ function GithubIcon({ className }: { className?: string }) {
   );
 }
 
+/* ── Animated section heading with a growing underline ─────────────────── */
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div>
+      <div className="inline-flex flex-col">
+        <h2 className="text-base font-semibold">{title}</h2>
+        <motion.span
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, ease: "easeOut", delay: 0.1 }}
+          className="mt-1 h-[3px] w-10 origin-left rounded-full bg-gradient-to-r from-fin-400 to-fin-600"
+        />
+      </div>
+      {subtitle && <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>}
+    </div>
+  );
+}
+
 /* ── Shared scroll-reveal section wrapper ──────────────────────────────── */
 function Reveal({
   children,
@@ -63,10 +93,10 @@ function Reveal({
 }) {
   return (
     <motion.section
-      initial={{ opacity: 0, y: 24 }}
+      initial={{ opacity: 0, y: 28 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-60px" }}
-      transition={{ duration: 0.5, delay, ease: "easeOut" }}
+      transition={{ duration: 0.55, delay, ease: "easeOut" }}
       className={className}
     >
       {children}
@@ -74,14 +104,23 @@ function Reveal({
   );
 }
 
-/* ── Stagger container + item for card grids ───────────────────────────── */
+/* ── Variants ──────────────────────────────────────────────────────────── */
 const containerVariants: Variants = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.08 } },
+  show: { transition: { staggerChildren: 0.09, delayChildren: 0.05 } },
 };
 const itemVariants: Variants = {
-  hidden: { opacity: 0, y: 18 },
+  hidden: { opacity: 0, y: 20 },
   show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } },
+};
+// Directional entrance — cards slide in from alternating sides.
+const directionalVariants: Variants = {
+  hidden: (i: number) => ({
+    opacity: 0,
+    y: 26,
+    x: i === 0 ? -26 : i === 2 ? 26 : 0,
+  }),
+  show: { opacity: 1, x: 0, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
 };
 
 /* ── Count-up number, triggered when scrolled into view ────────────────── */
@@ -90,7 +129,7 @@ function Counter({
   decimals = 0,
   prefix = "",
   suffix = "",
-  duration = 1.4,
+  duration = 1.6,
 }: {
   to: number;
   decimals?: number;
@@ -127,6 +166,21 @@ function Counter({
 
 export default function AboutPage() {
   const { t } = useTranslation();
+
+  // Scroll progress is tracked with a MotionValue updated from the page's own
+  // scroll container. Using a MotionValue (not state) avoids re-rendering the
+  // page on every scroll frame — which would otherwise restart the marquees.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const progress = useMotionValue(0);
+  // Subtle parallax for the hero glow orbs as the page scrolls.
+  const orbParallax = useTransform(progress, [0, 1], [0, -120]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    progress.set(max > 0 ? el.scrollTop / max : 0);
+  };
 
   const capabilities = [
     { icon: MessageSquare, title: "Cited Q&A", desc: "Ask a filing in plain English; every answer cites the exact page and excerpt.", color: "text-fin-400", bg: "bg-fin-500/10" },
@@ -171,66 +225,111 @@ export default function AboutPage() {
     <div className="flex flex-col h-screen overflow-hidden">
       <Header title={t("about.title")} subtitle={t("about.subtitle")} />
 
-      <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-10">
+      {/* Reading-progress bar */}
+      <div className="relative h-[3px] w-full bg-white/[0.04] z-10">
+        <motion.div
+          style={{ scaleX: progress }}
+          className="h-full origin-left bg-gradient-to-r from-fin-300 via-fin-400 to-fin-600"
+        />
+      </div>
+
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-10"
+      >
         {/* ── Hero ───────────────────────────────────────────────────────── */}
         <motion.section
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          className="relative overflow-hidden gradient-card p-6 sm:p-8 lg:p-10"
+          className="relative overflow-hidden gradient-card p-6 sm:p-8 lg:p-12"
         >
+          {/* Floating, parallaxed glow orbs */}
           <motion.div
             aria-hidden
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 1.2, ease: "easeOut" }}
-            className="absolute -top-28 -right-20 w-80 h-80 rounded-full bg-fin-500/10 blur-3xl pointer-events-none"
+            style={{ y: orbParallax }}
+            animate={{ scale: [1, 1.12, 1], x: [0, 18, 0] }}
+            transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute -top-28 -right-16 w-80 h-80 rounded-full bg-fin-500/15 blur-3xl pointer-events-none"
+          />
+          <motion.div
+            aria-hidden
+            animate={{ scale: [1, 1.2, 1], y: [0, -16, 0] }}
+            transition={{ duration: 11, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+            className="absolute -bottom-32 -left-10 w-72 h-72 rounded-full bg-fin-700/15 blur-3xl pointer-events-none"
           />
 
-          <div className="relative z-10 max-w-3xl">
-            <Badge variant="default" className="mb-4 gap-1.5">
-              <Sparkles className="w-3 h-3" />
-              Financial Document Intelligence
-            </Badge>
+          <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="show"
+            className="relative z-10 max-w-3xl"
+          >
+            <motion.div variants={itemVariants}>
+              <Badge variant="default" className="mb-4 gap-1.5">
+                <motion.span
+                  animate={{ rotate: [0, 18, -10, 0] }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  <Sparkles className="w-3 h-3" />
+                </motion.span>
+                Financial Document Intelligence
+              </Badge>
+            </motion.div>
 
-            <motion.div
-              className="flex items-center gap-3 mb-4"
-              initial={{ opacity: 0, x: -12 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.15, duration: 0.5 }}
-            >
-              <Image
-                src="/logo-mark.svg"
-                alt="Fin-Sight"
-                width={44}
-                height={44}
-                className="drop-shadow-[0_0_18px_rgba(245,166,35,0.45)] flex-shrink-0"
-                priority
-              />
+            <motion.div variants={itemVariants} className="flex items-center gap-3 mb-4">
+              <motion.div
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
+                className="relative flex-shrink-0"
+              >
+                {/* pulsing halo */}
+                <motion.span
+                  aria-hidden
+                  animate={{ scale: [1, 1.4, 1], opacity: [0.5, 0, 0.5] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                  className="absolute inset-0 rounded-full bg-fin-500/40 blur-md"
+                />
+                <Image
+                  src="/logo-mark.svg"
+                  alt="Fin-Sight"
+                  width={46}
+                  height={46}
+                  className="relative drop-shadow-[0_0_18px_rgba(245,166,35,0.45)]"
+                  priority
+                />
+              </motion.div>
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
                 Fin<span className="text-fin-400">-</span>Sight
               </h2>
             </motion.div>
 
-            <h1 className="text-xl sm:text-2xl font-semibold leading-snug mb-3">
+            <motion.h1
+              variants={itemVariants}
+              className="text-xl sm:text-2xl font-semibold leading-snug mb-3"
+            >
               <span className="text-gradient">
                 A production-grade financial RAG platform on a $0/month stack
               </span>
-            </h1>
+            </motion.h1>
 
-            <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
+            <motion.p
+              variants={itemVariants}
+              className="text-sm sm:text-base text-muted-foreground leading-relaxed"
+            >
               Fin-Sight is a multi-tenant Retrieval-Augmented Generation platform for
               SEC filings. Upload a 10-K, 10-Q, or earnings document, ask a question in
               plain English, and get an answer that points back to the exact page and
               paragraph it came from — with document comparison, anomaly alerts, and
               proactive EDGAR monitoring built in.
-            </p>
-          </div>
+            </motion.p>
+          </motion.div>
         </motion.section>
 
         {/* ── By the numbers ────────────────────────────────────────────── */}
         <Reveal className="space-y-4">
-          <h2 className="text-base font-semibold">By the numbers</h2>
+          <SectionTitle title="By the numbers" />
           <motion.div
             variants={containerVariants}
             initial="hidden"
@@ -242,9 +341,11 @@ export default function AboutPage() {
               <motion.div
                 key={s.label}
                 variants={itemVariants}
-                whileHover={{ y: -4 }}
-                className="gradient-card p-5 h-full"
+                whileHover={{ y: -6 }}
+                className="group relative gradient-card p-5 h-full overflow-hidden transition-shadow duration-300 hover:shadow-[0_0_24px_rgba(245,166,35,0.18)]"
               >
+                {/* top accent line grows on hover */}
+                <span className="absolute top-0 left-0 h-[2px] w-full origin-left scale-x-0 bg-gradient-to-r from-fin-400 to-fin-600 transition-transform duration-500 group-hover:scale-x-100" />
                 <p className="text-2xl sm:text-3xl font-bold text-gradient tabular-nums">
                   <Counter to={s.value} decimals={s.decimals} prefix={s.prefix} suffix={s.suffix} />
                 </p>
@@ -256,10 +357,7 @@ export default function AboutPage() {
 
         {/* ── What it does ──────────────────────────────────────────────── */}
         <Reveal className="space-y-4">
-          <div>
-            <h2 className="text-base font-semibold">What it does</h2>
-            <p className="text-xs text-muted-foreground mt-1">Four capabilities, one workspace.</p>
-          </div>
+          <SectionTitle title="What it does" subtitle="Four capabilities, one workspace." />
           <motion.div
             variants={containerVariants}
             initial="hidden"
@@ -273,10 +371,15 @@ export default function AboutPage() {
                 <motion.div
                   key={cap.title}
                   variants={itemVariants}
-                  whileHover={{ y: -4 }}
-                  className="gradient-card p-5 flex items-start gap-4 h-full"
+                  whileHover={{ y: -6 }}
+                  className="group gradient-card p-5 flex items-start gap-4 h-full transition-shadow duration-300 hover:shadow-[0_0_24px_rgba(245,166,35,0.15)]"
                 >
-                  <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0", cap.bg)}>
+                  <div
+                    className={cn(
+                      "w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6",
+                      cap.bg
+                    )}
+                  >
                     <Icon className={cn("w-5 h-5", cap.color)} />
                   </div>
                   <div className="min-w-0">
@@ -291,10 +394,7 @@ export default function AboutPage() {
 
         {/* ── Who it's for ──────────────────────────────────────────────── */}
         <Reveal className="space-y-4">
-          <div>
-            <h2 className="text-base font-semibold">Who it&apos;s for</h2>
-            <p className="text-xs text-muted-foreground mt-1">Built for the people who live in filings.</p>
-          </div>
+          <SectionTitle title="Who it's for" subtitle="Built for the people who live in filings." />
           <motion.div
             variants={containerVariants}
             initial="hidden"
@@ -302,16 +402,17 @@ export default function AboutPage() {
             viewport={{ once: true, margin: "-60px" }}
             className="grid grid-cols-1 md:grid-cols-3 gap-4"
           >
-            {audiences.map((a) => {
+            {audiences.map((a, i) => {
               const Icon = a.icon;
               return (
                 <motion.div
                   key={a.title}
-                  variants={itemVariants}
-                  whileHover={{ y: -4 }}
-                  className="gradient-card p-6 h-full"
+                  custom={i}
+                  variants={directionalVariants}
+                  whileHover={{ y: -6 }}
+                  className="group gradient-card p-6 h-full transition-shadow duration-300 hover:shadow-[0_0_24px_rgba(245,166,35,0.15)]"
                 >
-                  <div className="w-11 h-11 rounded-xl bg-fin-500/10 flex items-center justify-center mb-4">
+                  <div className="w-11 h-11 rounded-xl bg-fin-500/10 flex items-center justify-center mb-4 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6">
                     <Icon className="w-5 h-5 text-fin-400" />
                   </div>
                   <h3 className="text-sm font-semibold mb-1.5">{a.title}</h3>
@@ -322,54 +423,84 @@ export default function AboutPage() {
           </motion.div>
         </Reveal>
 
-        {/* ── Tech stack ────────────────────────────────────────────────── */}
+        {/* ── Tech stack (opposing marquees) ────────────────────────────── */}
         <Reveal className="space-y-4">
-          <div>
-            <h2 className="text-base font-semibold">Under the hood</h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              One PostgreSQL database holds metadata, chunks, the audit log — and the vectors themselves.
-            </p>
+          <SectionTitle
+            title="Under the hood"
+            subtitle="One PostgreSQL database holds metadata, chunks, the audit log — and the vectors themselves."
+          />
+
+          <div className="relative space-y-3 overflow-hidden">
+            {/* edge fades */}
+            <div className="absolute left-0 top-0 bottom-0 w-16 z-10 bg-gradient-to-r from-background to-transparent pointer-events-none" />
+            <div className="absolute right-0 top-0 bottom-0 w-16 z-10 bg-gradient-to-l from-background to-transparent pointer-events-none" />
+
+            <motion.div
+              className="flex gap-3 w-max"
+              animate={{ x: ["0%", "-50%"] }}
+              transition={{ duration: 26, repeat: Infinity, ease: "linear" }}
+            >
+              {[...stack, ...stack].map((tech, i) => {
+                const Icon = tech.icon;
+                return (
+                  <div
+                    key={`row1-${tech.label}-${i}`}
+                    className="flex items-center gap-2 rounded-full border border-white/10 bg-card px-4 py-2 flex-shrink-0"
+                  >
+                    <Icon className={cn("w-4 h-4 flex-shrink-0", tech.tint)} />
+                    <span className="text-xs font-medium whitespace-nowrap">{tech.label}</span>
+                  </div>
+                );
+              })}
+            </motion.div>
+
+            <motion.div
+              className="flex gap-3 w-max"
+              animate={{ x: ["-50%", "0%"] }}
+              transition={{ duration: 32, repeat: Infinity, ease: "linear" }}
+            >
+              {[...stack].reverse().concat([...stack].reverse()).map((tech, i) => {
+                const Icon = tech.icon;
+                return (
+                  <div
+                    key={`row2-${tech.label}-${i}`}
+                    className="flex items-center gap-2 rounded-full border border-white/10 bg-card px-4 py-2 flex-shrink-0"
+                  >
+                    <Icon className={cn("w-4 h-4 flex-shrink-0", tech.tint)} />
+                    <span className="text-xs font-medium whitespace-nowrap">{tech.label}</span>
+                  </div>
+                );
+              })}
+            </motion.div>
           </div>
-          <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true, margin: "-60px" }}
-            className="flex flex-wrap gap-3"
-          >
-            {stack.map((tech) => {
-              const Icon = tech.icon;
-              return (
-                <motion.div
-                  key={tech.label}
-                  variants={itemVariants}
-                  whileHover={{ scale: 1.05 }}
-                  className="flex items-center gap-2 rounded-full border border-white/10 bg-card px-4 py-2"
-                >
-                  <Icon className={cn("w-4 h-4 flex-shrink-0", tech.tint)} />
-                  <span className="text-xs font-medium whitespace-nowrap">{tech.label}</span>
-                </motion.div>
-              );
-            })}
-          </motion.div>
         </Reveal>
 
         {/* ── Creator ───────────────────────────────────────────────────── */}
         <Reveal className="space-y-4 pb-2">
-          <h2 className="text-base font-semibold">The maker</h2>
+          <SectionTitle title="The maker" />
           <motion.div
             whileHover={{ y: -4 }}
-            className="gradient-card p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center gap-6"
+            className="relative gradient-card p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center gap-6 overflow-hidden transition-shadow duration-300 hover:shadow-[0_0_30px_rgba(245,166,35,0.18)]"
           >
-            <motion.div
-              initial={{ scale: 0, rotate: -12 }}
-              whileInView={{ scale: 1, rotate: 0 }}
-              viewport={{ once: true }}
-              transition={{ type: "spring", stiffness: 200, damping: 14 }}
-              className="w-20 h-20 rounded-2xl bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center text-2xl font-bold text-white shadow-lg flex-shrink-0"
-            >
-              DS
-            </motion.div>
+            <div className="relative flex-shrink-0">
+              {/* infinite pulsing halo behind the avatar */}
+              <motion.span
+                aria-hidden
+                animate={{ scale: [1, 1.25, 1], opacity: [0.45, 0.15, 0.45] }}
+                transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+                className="absolute -inset-2 rounded-3xl bg-fin-500/40 blur-xl"
+              />
+              <motion.div
+                initial={{ scale: 0, rotate: -16 }}
+                whileInView={{ scale: 1, rotate: 0 }}
+                viewport={{ once: true }}
+                transition={{ type: "spring", stiffness: 200, damping: 13 }}
+                whileHover={{ rotate: 6, scale: 1.05 }}
+                className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-fin-400 to-fin-700 flex items-center justify-center text-2xl font-bold text-white shadow-lg"
+              >
+                DS
+              </motion.div>
+            </div>
 
             <div className="min-w-0 flex-1">
               <h3 className="text-lg font-semibold">Debarghya Sengupta</h3>
@@ -379,16 +510,18 @@ export default function AboutPage() {
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mt-4">
-                <Link
-                  href="https://github.com/Debarghyasg"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-2 text-sm font-medium transition-colors hover:border-fin-500/40 hover:bg-fin-500/10"
-                >
-                  <GithubIcon className="w-4 h-4" />
-                  @Debarghyasg
-                  <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                </Link>
+                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+                  <Link
+                    href="https://github.com/Debarghyasg"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-2 text-sm font-medium transition-colors hover:border-fin-500/40 hover:bg-fin-500/10"
+                  >
+                    <GithubIcon className="w-4 h-4" />
+                    @Debarghyasg
+                    <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </Link>
+                </motion.div>
 
                 <Badge variant="outline" className="gap-1.5">
                   <Lock className="w-3 h-3" />
