@@ -219,7 +219,8 @@ function PipelineStatus({
 /* ── Helper functions (replaces IIFEs to avoid SWC parse bug) ── */
 const DOC_TYPE_COLORS = ["#22c55e", "#47be85", "#7dd8ab", "#b0eacb", "#1a6645", "#3b82f6"];
 
-function buildDocTypeData(documents: ReturnType<typeof useAppStore>["documents"] extends (infer T)[] ? T[] : never[]) {
+ // AFTER
+function buildDocTypeData(documents: any[]) {
   const counts = new Map<string, number>();
   for (const d of documents) {
     counts.set((d as any).type, (counts.get((d as any).type) ?? 0) + 1);

@@ -67,6 +67,7 @@ export interface CreateSubscriptionInput {
 }
 
 export interface ListAlertsParams {
+  [key: string]: string | number | boolean | null | undefined;
   workspace_id?: string;
   ticker?: string;
   alert_type?: AlertType;

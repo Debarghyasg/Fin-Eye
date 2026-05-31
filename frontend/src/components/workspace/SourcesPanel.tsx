@@ -220,15 +220,17 @@ export function SourcesPanel({ loading = false }: SourcesPanelProps) {
                           <Hash className="w-2.5 h-2.5" />
                           {t("sources.page", { page: src.page })}
                         </span>
-                        {src.score > 0 && (
-                          <>
-                            <span className="text-white/20">·</span>
-                            <span className="inline-flex items-center gap-0.5">
-                              <TrendingUp className="w-2.5 h-2.5" />
-                              {t("sources.match", { pct: (src.score * 100).toFixed(0) })}
-                            </span>
-                          </>
-                        )}
+                        
+                        {(src as any).score > 0 && (
+  <>
+    <span className="text-white/20">·</span>
+    <span className="inline-flex items-center gap-0.5">
+      <TrendingUp className="w-2.5 h-2.5" />
+      {t("sources.match", { pct: ((src as any).score * 100).toFixed(0) })}
+    </span>
+  </>
+)}
+
                       </div>
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 group-hover:text-fin-400 transition-all" />

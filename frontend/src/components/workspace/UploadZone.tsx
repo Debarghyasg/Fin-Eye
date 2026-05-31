@@ -298,9 +298,8 @@ export function UploadZone() {
           {t("upload.resolvingWorkspace")}
         </div>
       )}
-
+<div {...getRootProps()}>
       <motion.div
-        {...getRootProps()}
         whileHover={{ scale: 1.005 }}
         whileTap={{ scale: 0.998 }}
         className={cn(
@@ -350,7 +349,8 @@ export function UploadZone() {
             </span>
           </>
         )}
-      </motion.div>
+</motion.div>
+      </div>
 
       <AnimatePresence>
         {files.map((f) => (
